@@ -1,0 +1,142 @@
+---
+title: "Nighttime fire effects on Sierra Nevada yellow pine/mixed-conifer: Preliminary results"
+csl: ../docs_carpentry/frontiers-in-ecology-and-the-environment.csl
+bibliography: ../docs_carpentry/nighttime-fire-effects.bib
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r dependencies, echo = FALSE}
+library(sf)
+library(tidyverse)
+library(purrr)
+library(sp)
+library(raster)
+library(fasterize)
+library(rasterVis)
+library(lubridate)
+library(viridis)
+library(here)
+```
+
+# Introduction
+
+Can we detect differences in fire effects to vegetation between areas that burned during the day versus areas that burned at night?
+
+We'll test this using a dataset of fire effects in the Sierra Nevada yellow pine/mixed-conifer forest [@koontz2019]. This dataset measures fire effects using composite pre- and post-fire Landsat satellite imagery and the relativized burn ratio (RBR) [@parks2014a], which strongly correlates with overstory mortality in this system [@koontz2019a]. This dataset was derived from fire perimeters curated by the CalFire Fire Resource and Protection (FRAP) program, and thus includes smaller fire events (down to 4 hectares).
+
+We are using the MODIS/Aqua+Terra Thermal Anomalies/Fire locations 1km FIRMS V006 NRT (Vector data) product to identify 1 km pixels containing at least one fire [@lance2019]. Each observation represents the centroid of a ~1km pixel within which a fire was detected. The size of each pixel is specifically determined using the SCAN (east-west pixel size) and TRACK (north-south pixel size) attributes (which account for oblong pixels resulting from off-nadir detections). The DAYNIGHT attribute represents whether the fire was detected during the day or during the night in local time.
+
+# Methods
+
+The spatial points from the active fire product have been temporally subsetted to fires buring between November 1, 2000 and April 25, 2019 and spatially subsetted to fires burning within the Sierra Nevada mountain range in California using Jepson ecoregions (including the Tehachapi extension) [@jepsonfloraproject2016]. Thanks Joe!
+
+I transformed the spatial points to the EPSG3310 coordinate reference system (California Albers), to match the FRAP-derived fire effects data from @koontz2019.
+
+I subsetted the @koontz2019 data to just fires within the temporal period of the active fire product (i.e. after November 1, 2000).
+
+For each active fire point, I created a rectangular buffer around it using the SCAN and TRACK attributes. I also assigned a unique identifier to each active fire point (`pt_id`).
+
+For each fire perimeter in @koontz2019, I subsetted the active fire points to those whose rectangle overlapped with it and whose aquisition date was within 11 days before the fire's discovery date and 1 year and 11 days after the fire's discovery date. The fire effects are measured between the discovery date and 1 year later, and the 11 day buffer on either side reflects the ideal temporal clustering value from Lise et al.'s algorithm.
+
+I rasterized the rectangular buffers around the daytime active fires and nighttime active fires separately, counting the number of overlapping rectangles in each category (day and night) per 30 meter pixel, which matches the resolution of the fire effects data set. 
+
+I created a "single active fire" mask (a raster layer) representing all the 30m resolution pixels with only a single active fire detection. I created a "single active daytime fire" mask and a "single active nighttime fire" mask which divided the "single active fire" mask into daytime and nighttime events. That is, we've now identified 30m resolution pixels (for which we have fire effects data) that only had a single active fire detection during the day, and a single active fire detection during the night. This eliminates all pixels that burned across both day and night to hopefully isolate the fire effects resulting from daytime versus nighttime burning.
+
+I collated all of the fire effects pixels (the RBR values) for each fire in the "single active daytime fire" category and the "single active nighttime fire" category. I also included the unique fire event ID, the unique active fire point ID, and whether or not the pixel burned in yellow pine/mixed-conifer forest (according to the Fire Return Interval Departure database-- see @koontz2019a).
+
+# Results
+
+**tl;dr** I'm not detecting any differences in fire severity between areas that saw a single daytime active fire detection and areas that saw a single nighttime active fire detection.
+
+```{r get_data, echo = FALSE}
+rbr_vals_per_active_fire_hit <-
+  readr::read_csv(here::here("data/data_output/rbr-vals-per-active-fire-hit.csv"))
+
+ypmc <-
+  rbr_vals_per_active_fire_hit %>% filter(ypmc == 1)
+```
+
+We have fire effects information (RBR) for `r nrow(rbr_vals_per_active_fire_hit)` 30m pixels. Those pixels represent `r rbr_vals_per_active_fire_hit %>%
+  group_by(ypmc) %>%
+  tally() %>%
+  dplyr::filter(ypmc == 1) %>% pull(n)` pixels burning in yellow pine/mixed-conifer within `r rbr_vals_per_active_fire_hit %>%
+  filter(ypmc == 1) %>%
+  group_by(fire_id, pt_id) %>%
+  tally() %>% nrow()` unique active fire detection rectangles in
+`r rbr_vals_per_active_fire_hit %>% 
+filter(ypmc == 1) %>% 
+group_by(fire_id) %>% 
+tally() %>% 
+nrow()` fire events.
+
+Overall difference in RBR between day and night fire detections:
+
+```{r overall_boxplot}
+ggplot(ypmc, aes(x = DAYNIGHT, y = rbr)) +
+  geom_boxplot() +
+  labs(x = "Day or night",
+       y = "RBR")
+```
+
+Difference in mean RBR per active fire pixel between day and night fire detections:
+
+```{r}
+ypmc %>% 
+  group_by(pt_id, DAYNIGHT) %>% 
+  summarize(rbr = mean(rbr)) %>% 
+  ggplot(aes(x = DAYNIGHT, y = rbr)) +
+  geom_boxplot() +
+  labs(x = "Day or night",
+       y = "RBR (mean per active fire pixel)")
+```
+
+Difference in mean RBR per active fire pixel between day and night fire detections *per fire*. That is, for fires that had both a day and night active fire detection, what is the difference in mean RBR per detection between day and night detections (day minus night):
+
+```{r}
+ypmc %>% 
+  group_by(fire_id, DAYNIGHT, pt_id) %>% 
+  summarize(rbr = mean(rbr)) %>% 
+  summarize(rbr = mean(rbr)) %>% 
+  spread(key = DAYNIGHT, value = rbr) %>% 
+  mutate(diff = D - N) %>% 
+  filter(!is.na(diff)) %>% 
+  ggplot(aes(x = diff)) +
+  geom_density() +
+  labs(x = "delta mean RBR between day and night fire detections")
+```
+
+Difference in *minimum* RBR per active fire pixel between day and night fire detections *per fire*. That is, for fires that had both a day and night active fire detection, what is the difference in mean RBR per detection between day and night detections (day minus night):
+
+```{r}
+ypmc %>% 
+  group_by(fire_id, DAYNIGHT, pt_id) %>% 
+  summarize(rbr = mean(rbr)) %>% 
+  summarize(rbr = min(rbr)) %>% 
+  spread(key = DAYNIGHT, value = rbr) %>% 
+  mutate(diff = D - N) %>% 
+  filter(!is.na(diff)) %>% 
+  ggplot(aes(x = diff)) +
+  geom_density() +
+  labs(x = "delta minimum RBR between day and night fire detections")
+```
+
+Difference in *maximum* RBR per active fire pixel between day and night fire detections *per fire*. That is, for fires that had both a day and night active fire detection, what is the difference in mean RBR per detection between day and night detections (day minus night):
+
+```{r}
+ypmc %>% 
+  group_by(fire_id, DAYNIGHT, pt_id) %>% 
+  summarize(rbr = mean(rbr)) %>% 
+  summarize(rbr = max(rbr)) %>% 
+  spread(key = DAYNIGHT, value = rbr) %>% 
+  mutate(diff = D - N) %>% 
+  filter(!is.na(diff)) %>% 
+  ggplot(aes(x = diff)) +
+  geom_density() +
+  labs(x = "delta maximum RBR between day and night fire detections")
+```
+
+# References
