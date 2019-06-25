@@ -1,0 +1,170 @@
+---
+title: "Active fire detection/severity EDA"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r dependencies}
+library(tidyverse)
+library(sf)
+library(raster)
+library(purrr)
+library(here)
+```
+
+# Read all the data
+
+```{r}
+severity_adf_filepaths <-
+  list.files(path = here::here("data/data_output/wildfire-severity-active-fire-detections_sierra-nevada-ca-usa_ypmc_1984-2017"),
+             full.names = TRUE)
+
+full_dataframe <- 
+  severity_adf_filepaths %>% 
+  map(.f = read.csv,
+      stringsAsFactors = FALSE) %>% 
+  bind_rows()
+```
+
+
+```{r pressure, echo=FALSE}
+rim_full <- full_dataframe %>% filter(fire_id == "0000e6fc4b09ab014e89")
+rim <-
+  rim_full %>%
+  dplyr::filter(count_total > 0) %>% 
+  st_as_sf(coords = c("x_3310", "y_3310"), remove = FALSE, crs = 3310)
+
+rim_meta <- frap_meta %>% filter(fire_id == "0000e6fc4b09ab014e89")
+
+plot(rim_meta$geometry)
+
+rim_start <- 
+  frap_meta %>% 
+  dplyr::filter(fire_id == "0000e6fc4b09ab014e89") %>% 
+  st_drop_geometry() %>% 
+  dplyr::select(alarm_year, alarm_month, alarm_day) %>% 
+  dplyr::mutate(alarm_date = paste0(alarm_year, "-", alarm_month, "-", alarm_day, " ", "00:00")) %>% 
+  dplyr::pull(alarm_date) %>% 
+  ymd_hm()
+
+rim_first <-
+  rim %>% 
+  st_drop_geometry() %>% 
+  dplyr::mutate(days_since_alarm = as.numeric((lubridate::seconds(firstACQ) + ymd_hm("1970-01-01 00:00")) - rim_start)) %>% 
+  dplyr::select(x_3310, y_3310, days_since_alarm) %>% 
+  dplyr::filter(days_since_alarm < 90) %>% 
+  rasterFromXYZ(res = c(30, 30), crs = st_crs(rim_meta)$proj4string)
+
+rim_last <-
+  rim %>% 
+  st_drop_geometry() %>% 
+  dplyr::mutate(days_since_alarm = as.numeric((lubridate::seconds(lastACQ) + ymd_hm("1970-01-01 00:00")) - rim_start)) %>% 
+  dplyr::select(x_3310, y_3310, days_since_alarm) %>% 
+  dplyr::filter(days_since_alarm < 90) %>% 
+  rasterFromXYZ(res = c(30, 30), crs = st_crs(rim_meta)$proj4string)
+
+rim_diff <- r_last - r_first
+
+rim_propNight <-
+  rim %>% 
+  st_drop_geometry() %>% 
+  dplyr::select(x_3310, y_3310, prop_night) %>% 
+  rasterFromXYZ(res = c(30, 30), crs = st_crs(rim_meta)$proj4string)
+
+plot(rim_propNight, col = viridis(50))
+
+plot(rim_first, col = viridis(40))
+plot(rim_diff, col = viridis(40))
+
+ggplot(rim %>% filter(abs(dist_to_edge) < 30), aes(x = prop_night, y = rbr)) +
+  geom_point() +
+  geom_smooth()
+
+ggplot(rim %>% slice(sample(nrow(.), 100000)) %>% dplyr::mutate(days_since_alarm = as.numeric((lubridate::seconds(firstACQ) + ymd_hm("1970-01-01 00:00")) - rim_start)) %>% dplyr::filter(days_since_alarm < 90), aes(x = days_since_alarm, y = prop_night)) +
+  geom_point() +
+  geom_smooth()
+
+hist(rim$rbr)
+
+rim_afd <- spatial_hits3310[[472]]
+
+small <- 
+  rim %>% 
+  filter(count_total == 1) %>% 
+  filter(dist_to_edge < sqrt(2000)) %>% 
+  st_drop_geometry() %>% 
+  dplyr::left_join(rim_afd, by = "pt_id") %>% 
+  st_as_sf()
+
+small
+
+plot(small$geom)
+plot(rim_meta$geometry, add = TRUE, col = NA)
+
+test <- 
+  small %>% 
+  dplyr::mutate(adf_pixel_area_in_fire = map_dbl(.x = geom, .f = function(pixel_footprint) {st_area(st_crop(x = rim_meta, y = pixel_footprint))}))
+
+
+test %>% filter(adf_pixel_area_in_fire < 1e6) %>% filter(intersects_fire_perim) %>% arrange(-adf_pixel_area_in_fire) %>% group_by(pt_id) %>% tally()
+
+rim %>% st_drop_geometry() %>% filter(count_total == 1) %>% group_by(pt_id) %>% tally() %>% arrange(desc(n)) %>% as.data.frame()
+
+
+test2 <- st_crop(rim_meta, small[1, ])
+plot(rim_meta$geometry)
+plot(small[1, ]$geom, add = TRUE)
+plot(test2$geometry, add = TRUE, col = "red")
+
+st_area(test2)
+st_area(small[1, ])
+
+test[1, ]$adf_pixel_area_in_fire
+plot(test[1, ]$geom)
+str(test)
+plot(test[, "adf_pixel_area_in_fire"], pal = viridis)
+plot(rim_meta$geometry)
+plot(test$geom, add = TRUE)
+
+king_full <- full_dataframe %>% filter(fire_id == "0000bc582d747062ba66")
+king <-
+  king_full %>%
+  dplyr::filter(count_total > 0) %>% 
+  st_as_sf(coords = c("x_3310", "y_3310"), remove = FALSE, crs = 3310)
+
+king_meta <- frap_meta %>% filter(fire_id == "0000bc582d747062ba66")
+
+king_start <- 
+  frap_meta %>% 
+  dplyr::filter(fire_id == "0000bc582d747062ba66") %>% 
+  st_drop_geometry() %>% 
+  dplyr::select(alarm_year, alarm_month, alarm_day) %>% 
+  dplyr::mutate(alarm_date = paste0(alarm_year, "-", alarm_month, "-", alarm_day, " ", "00:00")) %>% 
+  dplyr::pull(alarm_date) %>% 
+  ymd_hm()
+
+king_first <-
+  king %>% 
+  st_drop_geometry() %>% 
+  dplyr::mutate(days_since_alarm = as.numeric((lubridate::seconds(firstACQ) + ymd_hm("1970-01-01 00:00")) - king_start)) %>% 
+  dplyr::select(x_3310, y_3310, days_since_alarm) %>% 
+  dplyr::filter(days_since_alarm < 90) %>% 
+  rasterFromXYZ(res = c(30, 30), crs = st_crs(king_meta)$proj4string)
+
+king_last <-
+  king %>% 
+  st_drop_geometry() %>% 
+  dplyr::mutate(days_since_alarm = as.numeric((lubridate::seconds(lastACQ) + ymd_hm("1970-01-01 00:00")) - king_start)) %>% 
+  dplyr::select(x_3310, y_3310, days_since_alarm) %>% 
+  dplyr::filter(days_since_alarm < 90) %>% 
+  rasterFromXYZ(res = c(30, 30), crs = st_crs(king_meta)$proj4string)
+
+plot(king_first, col = rev(viridis(40)))
+plot(king_last, col = rev(viridis(40)))
+plot(king_last - king_first, col = rev(viridis(40)))
+plot(rim_first, col = rev(viridis(40)))
+
+```
