@@ -7,3 +7,4 @@ data/data_output/rbr-vals-per-active-fire-hit.csv
 data/data_raw/wildfire-severity_sierra-nevada-ca-usa_ypmc_1984-2017_fire-metadata.csv
 data/data_raw/wildfire-severity_sierra-nevada-ca-usa_ypmc_1984-2017_fire-metadata.geoJSON
 data/data_raw/wildfire-severity_sierra-nevada-ca-usa_ypmc_1984-2017_rasters/*
+data/data_output/*
