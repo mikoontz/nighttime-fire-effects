@@ -8,3 +8,7 @@ data/data_raw/wildfire-severity_sierra-nevada-ca-usa_ypmc_1984-2017_fire-metadat
 data/data_raw/wildfire-severity_sierra-nevada-ca-usa_ypmc_1984-2017_fire-metadata.geoJSON
 data/data_raw/wildfire-severity_sierra-nevada-ca-usa_ypmc_1984-2017_rasters/*
 data/data_output/*
+data/data_raw/*
+figures/missing-vpd-afd_2013.png
+figures/non-missing-vpd-afd_2013.png
+data/data_carpentry/overpass_pred.pl
