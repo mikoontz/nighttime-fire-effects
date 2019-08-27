@@ -84,5 +84,4 @@ FIRED_meta <-
   dplyr::select(-.geo) %>% 
   dplyr::rename(FIRED.system.index = 'system:index')
 
-FIRED_full <- dplyr::full_join(FIRED_filtered, FIRED_meta, by = "FIRED.system.index")
-
+FIRED_full <- dplyr::left_join(FIRED_filtered, FIRED_meta, by = "FIRED.system.index")
