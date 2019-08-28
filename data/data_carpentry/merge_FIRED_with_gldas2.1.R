@@ -6,12 +6,12 @@ library(lubridate)
 
 get_FIREDgldas2.1 <- function(year, download = TRUE) {
   
-  if(file.exists(paste0("data/data_output/FIRED-with-gldas2.1-climate-variables/FIRED-climate-variables_", year, ".csv"))) {
+  if(file.exists(paste0("data/data_output/FIRED-with-gldas2.1-climate-variables/FIRED-gldas2.1-climate-variables_CONUS_", year, ".csv"))) {
     (FIRED_climateVars_thisYear <- 
-       data.table::fread(paste0("data/data_output/FIRED-with-gldas2.1-climate-variables/FIRED-climate-variables_", year, ".csv")))
+       data.table::fread(paste0("data/data_output/FIRED-with-gldas2.1-climate-variables/FIRED-gldas2.1-climate-variables_CONUS_", year, ".csv")))
     
   } else {
-    (FIRED_climateVars_thisYear <- try(data.table::fread(paste0("https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/FIRED-with-gldas2.1-climate-variables/FIRED-climate-variables_", year, ".csv"))))
+    (FIRED_climateVars_thisYear <- try(data.table::fread(paste0("https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/FIRED-with-gldas2.1-climate-variables/FIRED-gldas2.1-climate-variables_CONUS_", year, ".csv"))))
     
     if ("try-error" %in% class(FIRED_climateVars_thisYear)) {
       FIRED_climateVars_thisYear <- NULL
@@ -23,7 +23,7 @@ get_FIREDgldas2.1 <- function(year, download = TRUE) {
           dir.create("data/data_output/FIRED-with-gldas2.1-climate-variables")
         }
         data.table::fwrite(x = FIRED_climateVars_thisYear, 
-                           file = paste0("data/data_output/FIRED-with-gldas2.1-climate-variables/FIRED-climate-variables_", year, ".csv"))
+                           file = paste0("data/data_output/FIRED-with-gldas2.1-climate-variables/FIRED-gldas2.1-climate-variables_CONUS_", year, ".csv"))
       }
     }
   }
@@ -35,12 +35,12 @@ get_FIREDgldas2.1 <- function(year, download = TRUE) {
 
 get_FIREDmetadata <- function(download = TRUE) {
   
-  if(file.exists("data/data_output/FIRED-with-gldas2.1-climate-variables/ee-FIRED_metadata.csv")) {
+  if(file.exists("data/data_output/FIRED-with-gldas2.1-climate-variables/ee-FIRED_CONUS_metadata.csv")) {
     (FIRED_metadata <- 
-       data.table::fread("data/data_output/FIRED-with-gldas2.1-climate-variables/ee-FIRED_metadata.csv"))
+       data.table::fread("data/data_output/FIRED-with-gldas2.1-climate-variables/ee-FIRED_CONUS_metadata.csv"))
     
   } else {
-    (FIRED_metadata <- try(data.table::fread("https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/FIRED-with-gldas2.1-climate-variables/ee-FIRED_metadata.csv")))
+    (FIRED_metadata <- try(data.table::fread("https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/FIRED-with-gldas2.1-climate-variables/ee-FIRED_CONUS_metadata.csv")))
     
     if ("try-error" %in% class(FIRED_metadata)) {
       FIRED_metadata <- NULL
@@ -52,7 +52,7 @@ get_FIREDmetadata <- function(download = TRUE) {
           dir.create("data/data_output/FIRED-with-gldas2.1-climate-variables")
         }
         data.table::fwrite(x = FIRED_metadata, 
-                           file = "data/data_output/FIRED-with-gldas2.1-climate-variables/ee-FIRED_metadata.csv")
+                           file = "data/data_output/FIRED-with-gldas2.1-climate-variables/ee-FIRED_CONUS_metadata.csv")
       }
     }
   }
