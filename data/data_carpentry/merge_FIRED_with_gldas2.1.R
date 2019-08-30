@@ -74,8 +74,8 @@ FIRED_filtered <-
                 hour = hour(datetime),
                 minute = minute(datetime)) %>% 
   tidyr::separate(col = 'system:index', into = c("FIRED.system.index",
-                                               "GLDAS2.1.system.index",
-                                               "GLDAS2.1.timestamp")) %>% 
+                                                 "GLDAS2.1.system.index",
+                                                 "GLDAS2.1.timestamp")) %>% 
   tidyr::unite(col = GLDAS2.1.system.index, GLDAS2.1.system.index, GLDAS2.1.timestamp)
 
 FIRED_meta <- get_FIREDmetadata()
@@ -84,4 +84,4 @@ FIRED_meta <-
   dplyr::select(-.geo) %>% 
   dplyr::rename(FIRED.system.index = 'system:index')
 
-FIRED_full <- dplyr::left_join(FIRED_filtered, FIRED_meta, by = "FIRED.system.index")
+FIRED_gldas <- dplyr::left_join(FIRED_filtered, FIRED_meta, by = "FIRED.system.index")
