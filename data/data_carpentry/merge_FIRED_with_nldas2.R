@@ -37,10 +37,10 @@ get_FIREDmetadata <- function(download = TRUE) {
   
   if(file.exists("data/data_output/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg")) {
     (FIRED_metadata <- 
-       sf::st_read("data/data_output/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg", stringsAsFactors = FALSE))
+       sf::st_read("data/data_output/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg", stringsAsFactors = FALSE, driver = "GPKG"))
     
   } else {
-    (FIRED_metadata <- try(sf::st_read("https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg", stringsAsFactors = FALSE)))
+    (FIRED_metadata <- try(sf::st_read("https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg", stringsAsFactors = FALSE, driver = "GPKG")))
     
     if ("try-error" %in% class(FIRED_metadata)) {
       FIRED_metadata <- NULL
@@ -52,7 +52,7 @@ get_FIREDmetadata <- function(download = TRUE) {
           dir.create("data/data_output/FIRED-with-nldas2-climate-variables_CONUS")
         }
         sf::st_write(obj = FIRED_metadata, 
-                     dsn = "data/data_output/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg")
+                     dsn = "data/data_output/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg", driver = "GPKG")
       }
     }
   }
