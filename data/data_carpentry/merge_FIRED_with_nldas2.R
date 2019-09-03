@@ -64,15 +64,18 @@ FIRED <- lapply(2000:2019, get_FIREDnldas2)
 
 FIRED_filtered <- 
   FIRED[which(purrr::map_lgl(FIRED, .f = function(x) {return(!is.null(x))}))] %>% 
-  data.table::rbindlist() %>% 
-  dplyr::mutate(datetime = as.POSIXct(nldas_datetime / 1000,
-                                      origin = "1970-01-01", 
-                                      tz = "zulu"),
-                year = year(datetime),
-                month = month(datetime),
-                day = day(datetime),
-                hour = hour(datetime),
-                minute = minute(datetime)) %>% 
+  data.table::rbindlist() 
+
+FIRED_filtered[, datetime := as.POSIXct(nldas_datetime / 1000,
+                                        origin = "1970-01-01", 
+                                        tz = "zulu")]
+FIRED_filtered <-
+  FIRED_filtered[, `:=`(year = year(datetime),
+                        month = month(datetime),
+                        day = day(datetime),
+                        hour = hour(datetime),
+                        minute = minute(datetime),
+                        .geo = NULL)] %>% 
   tidyr::separate(col = 'system:index', into = c("FIRED.system.index",
                                                  "NLDAS2.system.index",
                                                  "NLDAS2.timestamp")) %>% 
