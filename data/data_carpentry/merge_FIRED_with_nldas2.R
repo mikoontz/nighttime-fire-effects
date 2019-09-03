@@ -35,12 +35,12 @@ get_FIREDnldas2 <- function(year, download = TRUE) {
 
 get_FIREDmetadata <- function(download = TRUE) {
   
-  if(file.exists("data/data_output/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.csv")) {
+  if(file.exists("data/data_output/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg")) {
     (FIRED_metadata <- 
-       data.table::fread("data/data_output/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.csv"))
+       sf::st_read("data/data_output/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg"))
     
   } else {
-    (FIRED_metadata <- try(data.table::fread("https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.csv")))
+    (FIRED_metadata <- try(sf::st_read("https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg")))
     
     if ("try-error" %in% class(FIRED_metadata)) {
       FIRED_metadata <- NULL
@@ -51,8 +51,8 @@ get_FIREDmetadata <- function(download = TRUE) {
         if (!dir.exists("data/data_output/FIRED-with-nldas2-climate-variables_CONUS")) {
           dir.create("data/data_output/FIRED-with-nldas2-climate-variables_CONUS")
         }
-        data.table::fwrite(x = FIRED_metadata, 
-                           file = "data/data_output/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.csv")
+        sf::st_write(obj = FIRED_metadata, 
+                     dsn = "data/data_output/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg")
       }
     }
   }
@@ -79,6 +79,7 @@ FIRED_filtered <-
   tidyr::unite(col = NLDAS2.system.index, NLDAS2.system.index, NLDAS2.timestamp)
 
 FIRED_meta <- get_FIREDmetadata()
+
 FIRED_meta <-
   FIRED_meta %>% 
   dplyr::select(-.geo) %>% 
