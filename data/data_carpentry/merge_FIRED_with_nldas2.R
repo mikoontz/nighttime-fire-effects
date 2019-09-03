@@ -37,10 +37,10 @@ get_FIREDmetadata <- function(download = TRUE) {
   
   if(file.exists("data/data_output/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg")) {
     (FIRED_metadata <- 
-       sf::st_read("data/data_output/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg"))
+       sf::st_read("data/data_output/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg", stringsAsFactors = FALSE))
     
   } else {
-    (FIRED_metadata <- try(sf::st_read("https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg")))
+    (FIRED_metadata <- try(sf::st_read("https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/FIRED-with-nldas2-climate-variables_CONUS/ee-FIRED_CONUS_metadata.gpkg", stringsAsFactors = FALSE)))
     
     if ("try-error" %in% class(FIRED_metadata)) {
       FIRED_metadata <- NULL
@@ -82,7 +82,6 @@ FIRED_meta <- get_FIREDmetadata()
 
 FIRED_meta <-
   FIRED_meta %>% 
-  dplyr::select(-.geo) %>% 
-  dplyr::rename(FIRED.system.index = 'system:index')
+  dplyr::rename(FIRED.system.index = 'system.index')
 
 FIRED_nldas <- dplyr::left_join(FIRED_filtered, FIRED_meta, by = "FIRED.system.index")
