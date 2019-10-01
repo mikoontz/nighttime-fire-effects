@@ -11,7 +11,8 @@ library(purrr)
 library(aws.s3)
 library(furrr)
 library(tictoc)
-
+library(doParallel)
+library(foreach)
 
 
 if(!file.exists(file.path("data", "data_raw", "FIRED", "western_hemisphere_to_may2019.gpkg"))) {
@@ -94,52 +95,17 @@ spatiotemporal_match_to_fired = function(id, start_year, start_month, start_day,
       data.table::as.data.table()
     
     if(nrow(fired_afd_spatiotemporal_match) == 0) {
-      fired_afd_spatiotemporal_match <- NA
+      fired_afd_spatiotemporal_match <- NULL
     }
     
-  } else {fired_afd_spatiotemporal_match <- NA}
+  } else {fired_afd_spatiotemporal_match <- NULL}
   
   rm(afd)
   
   return(fired_afd_spatiotemporal_match)
 }
 
-public_ip <- c("34.223.88.162", "34.222.183.90")
-
-# This is where my pem file lives
-ssh_private_key_file <- file.path("H:", "dev", "aws", "mkoontz.pem")
-
-
-# connect to EC2 instances ------------------------------------------------
-
-cl <- makeClusterPSOCK(
-  
-  # Public IP number of EC2 instance
-  workers = public_ip,
-  
-  # User name (always 'ubuntu')
-  user = "ubuntu",
-  
-  # Use private SSH key registered with AWS
-  rshopts = c(
-    "-o", "StrictHostKeyChecking=no",
-    "-o", "IdentitiesOnly=yes",
-    "-i", ssh_private_key_file
-  ),
-  
-  # Set up .libPaths() for the 'ubuntu' user and
-  # install furrr
-  rscript_args = c(
-    "-e", shQuote("local({p <- Sys.getenv('R_LIBS_USER'); dir.create(p, recursive = TRUE, showWarnings = FALSE); .libPaths(p)})"),
-    "-e", shQuote("install.packages('furrr')")
-  ),
-  
-  # Switch this to TRUE to see the code that is run on the workers without
-  # making the connection
-  dryrun = FALSE
-)
-
-cl
+# rowwise pmap solution ------------------------------------------------
 
 tic()
 
@@ -161,17 +127,37 @@ afd_matches_to_fired <-
 toc()
 
 
+# rowwise foreach solution ------------------------------------------------
+
+fired <- fired_west[1:100, ]
+
+tic()
+
+cl <- makeCluster(4)
+registerDoParallel(cl)
+
+afd_matches_to_fired <- 
+  foreach(i = seq_along(1:nrow(fired)), 
+          .combine = rbind, 
+          .packages = c('tidyverse', 'sf', 'data.table')) %dopar% {
+            
+            fired %>% 
+              dplyr::slice(i) %>% 
+              dplyr::mutate(spatiotemporal_match = list(spatiotemporal_match_to_fired(id, start_year, start_month, start_day, last_year, last_month, last_day, geom))) %>% 
+              dplyr::filter(!is.na(spatiotemporal_match)) %>%
+              tidyr::unnest(cols = spatiotemporal_match) %>%
+              sf::st_drop_geometry()
+          }
+
+stopCluster(cl)
+
+afd_matches_to_fired <- as.data.table(afd_matches_to_fired)
+toc()
 
 
 
 
-
-
-
-
-
-
-
+?foreach
 
 
 
