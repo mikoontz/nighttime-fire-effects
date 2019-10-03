@@ -114,9 +114,7 @@ afd_list <-
             
             # If we don't want to download the data, read it directly into R from S3 bucket
             if(!file.exists(file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions", paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv"))) & !download) {
-              this_afd <- s3read_using(FUN = data.table::fread, 
-                                       object = paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv"),
-                                       bucket = "earthlab-mkoontz/mcd14ml_gldas21_resolve-ecoregions")
+              this_afd <- data.table::fread(paste0("https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/mcd14ml_gldas21_resolve-ecoregions/mcd14ml_gldas21_resolve-ecoregions_", i, ".csv"))
             }
             
             # expand the FIRED dataset for the particular year such that each row represents a single
