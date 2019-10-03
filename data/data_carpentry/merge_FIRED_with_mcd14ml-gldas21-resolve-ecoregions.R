@@ -74,11 +74,21 @@ v_determine_burning_days <-
 mcd14ml_years <- 2000:2019
 mcd14ml_years_named <- mcd14ml_years %>% setNames(mcd14ml_years)
 
-(start <- Sys.time())
-cl <- makeCluster(4)
-registerDoParallel(cl)
 
-subset_idx <- 1:2
+(start <- Sys.time())
+
+lapply(mcd14ml_years_named, FUN = function(i) {
+# Download the mcd14ml/gldas2.1/resolve-ecoregion data for the current year
+if(!file.exists(file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions", paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv")))) {
+  dir.create(file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions"), recursive = TRUE)
+  download.file(url = paste0("https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/mcd14ml_gldas21_resolve-ecoregions/mcd14ml_gldas21_resolve-ecoregions_", i, ".csv"),
+                destfile = file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions", paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv")))
+} 
+})
+(Sys.time() - start)
+
+cl <- makeCluster(20)
+registerDoParallel(cl)
 
 # Use a foreach() loop so we can easily parallelize it
 # include the necessary packages to be run inside the loop using the .packages= argument
@@ -86,23 +96,17 @@ subset_idx <- 1:2
 # loop runs. In our case, we want to name each list element so that we can fix the 2019
 # element more readily
 afd_list <- 
-  foreach(i = mcd14ml_years_named[subset_idx], .packages = c("tidyverse", "data.table", "sf"), 
-          .final = function(x) setNames(x, names(mcd14ml_years_named)[subset_idx])) %do% {
+  foreach(i = mcd14ml_years_named, .packages = c("tidyverse", "data.table", "sf"), 
+          .final = function(x) setNames(x, names(mcd14ml_years_named))) %dopar% {
             
             # expand the FIRED dataset for the particular year such that each row represents a single
             # burning day for each FIRED event
             fired_by_day <-
               fired %>%
-              dplyr::filter(start_year == i) %>% 
+              dplyr::filter(lubridate::year(start_date) == i) %>% 
               dplyr::mutate(burning_days = v_determine_burning_days(start_date, last_date)) %>% 
               tidyr::unnest(cols = burning_days)
-            
-            # Download the mcd14ml/gldas2.1/resolve-ecoregion data for the current year
-            if(!file.exists(file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions", paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv")))) {
-              download.file(url = "https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/mcd14ml_gldas21_resolve-ecoregions/mcd14ml_gldas21_resolve-ecoregions_2000.csv",
-                            destfile = file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions", paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv")))
-            } 
-            
+
             # Read in the active fire data for this year
             this_afd <- 
               data.table::fread(file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions", paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv"))) 
@@ -174,100 +178,4 @@ afd_list[["2019"]] <- afd_list[["2019"]] %>% dplyr::select(names(afd_list[["2018
 
 afd <- data.table::rbindlist(afd_list)
 print(Sys.time() - start)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# second attempt to use vectorized operations on FIRED perimeters ---------
-
-# spatiotemporal_match_to_fired = function(id, start_year, start_month, start_day, last_year, last_month, last_day, geom) {
-#   
-#   afd_idx <- which(names(afd_list) %in% seq(start_year, last_year))
-# 
-#   if(length(afd_idx) == 1) {
-#     afd <- afd_list[[afd_idx]]
-#   }
-# 
-#   if(length(afd_idx) > 1) {
-#     afd <-
-#       afd_list[afd_idx] %>%
-#       data.table::rbindlist(fill = TRUE)
-#   }
-#   
-#   fired_afd_temporal_match <- afd[(acq_year >= start_year) & (acq_year <= last_year)
-#                                   & (acq_month >= start_month) & (acq_month <= last_month)
-#                                   & (acq_day >= start_day) & (acq_day <= last_day)]
-#   
-#   if(nrow(fired_afd_temporal_match) > 0) {
-#     
-#     fired_afd_spatiotemporal_match <-
-#       fired_afd_temporal_match %>%
-#       sf::st_as_sf() %>%
-#       dplyr::filter(sf::st_intersects(., st_as_sf(st_geometry(geom), crs = fired_crs), sparse = FALSE)[, 1]) %>% 
-#       sf::st_drop_geometry() %>%
-#       data.table::as.data.table()
-#     
-#     if(nrow(fired_afd_spatiotemporal_match) == 0) {
-#       fired_afd_spatiotemporal_match <- NA
-#     }
-#     
-#   } else {fired_afd_spatiotemporal_match <- NA}
-#   
-#   rm(afd)
-#   
-#   return(list(fired_afd_spatiotemporal_match))
-# }
-
-
-# rowwise pmap solution ------------------------------------------------
-# too slow methinks
-# 
-# tic()
-# 
-# afd_matches_to_fired <-
-#   fired %>%
-#   dplyr::filter(start_year == 2011) %>% 
-#   dplyr::mutate(spatiotemporal_match = purrr::pmap(.l = list(id = id, 
-#                                                              start_year = start_year,
-#                                                              start_month = start_month,
-#                                                              start_day = start_day,
-#                                                              last_year = last_year,
-#                                                              last_month = last_month,
-#                                                              last_day = last_day,
-#                                                              geom = geom), 
-#                                                    .f = spatiotemporal_match_to_fired)) %>% 
-#   dplyr::filter(!is.na(spatiotemporal_match)) %>%
-#   tidyr::unnest(cols = spatiotemporal_match)
-# 
-# toc()
-
 
