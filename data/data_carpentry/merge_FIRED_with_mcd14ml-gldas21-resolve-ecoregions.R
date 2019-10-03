@@ -12,17 +12,27 @@ library(aws.s3)
 library(doParallel)
 library(foreach)
 
+download <- FALSE
+
 # Download the western hemisphere FIRED data from S3 if it doesn't exist on disk
-if(!file.exists(file.path("data", "data_raw", "FIRED", "western_hemisphere_to_may2019.gpkg"))) {
+if(!file.exists(file.path("data", "data_raw", "FIRED", "western_hemisphere_to_may2019.gpkg")) & download) {
   dir.create(path = file.path("data", "data_raw", "FIRED"), showWarnings = FALSE, recursive = TRUE)
-  fired_west <- save_object(object = "western_hemisphere_to_may2019.gpkg",
-                            bucket = "earthlab-natem/modis-burned-area/delineated_events", 
-                            file = file.path("data", "data_raw", "FIRED", "western_hemisphere_to_may2019.gpkg"))
-  
+  fired_west_path <- save_object(object = "western_hemisphere_to_may2019.gpkg",
+                                 bucket = "earthlab-natem/modis-burned-area/delineated_events", 
+                                 file = file.path("data", "data_raw", "FIRED", "western_hemisphere_to_may2019.gpkg"))
 } 
 
-# Read the western hemisphere data into memory as an sf object
-fired_west <- sf::st_read(file.path("data", "data_raw", "FIRED", "western_hemisphere_to_may2019.gpkg"))
+# Download the western hemisphere FIRED data from S3 if it doesn't exist on disk
+if(!file.exists(file.path("data", "data_raw", "FIRED", "western_hemisphere_to_may2019.gpkg")) & !download) {
+  fired_west <- s3read_using(FUN = sf::st_read, 
+                             object = "western_hemisphere_to_may2019.gpkg",
+                             bucket = "earthlab-natem/modis-burned-area/delineated_events")
+} 
+
+# Read the western hemisphere data into memory as an sf object if it exists on disk
+if(file.exists(file.path("data", "data_raw", "FIRED", "western_hemisphere_to_may2019.gpkg"))) {
+  fired_west <- sf::st_read(file.path("data", "data_raw", "FIRED", "western_hemisphere_to_may2019.gpkg"))
+}
 
 # For now, add a "duration" column so we can filter out rows that have start/last dates that are incompatible
 fired_west <- 
@@ -77,16 +87,6 @@ mcd14ml_years_named <- mcd14ml_years %>% setNames(mcd14ml_years)
 
 (start <- Sys.time())
 
-lapply(mcd14ml_years_named, FUN = function(i) {
-# Download the mcd14ml/gldas2.1/resolve-ecoregion data for the current year
-if(!file.exists(file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions", paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv")))) {
-  dir.create(file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions"), recursive = TRUE)
-  download.file(url = paste0("https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/mcd14ml_gldas21_resolve-ecoregions/mcd14ml_gldas21_resolve-ecoregions_", i, ".csv"),
-                destfile = file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions", paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv")))
-} 
-})
-(Sys.time() - start)
-
 cl <- makeCluster(20)
 registerDoParallel(cl)
 
@@ -99,6 +99,26 @@ afd_list <-
   foreach(i = mcd14ml_years_named, .packages = c("tidyverse", "data.table", "sf"), 
           .final = function(x) setNames(x, names(mcd14ml_years_named))) %dopar% {
             
+            # Download the mcd14ml/gldas2.1/resolve-ecoregion data for the current year
+            if(!file.exists(file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions", paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv"))) & download) {
+              dir.create(file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions"), recursive = TRUE)
+              download.file(url = paste0("https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/mcd14ml_gldas21_resolve-ecoregions/mcd14ml_gldas21_resolve-ecoregions_", i, ".csv"),
+                            destfile = file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions", paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv")))
+            } 
+            
+            if(file.exists(file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions", paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv")))) {
+              # Read in the active fire data for this year
+              this_afd <- 
+                data.table::fread(file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions", paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv"))) 
+            }              
+            
+            # If we don't want to download the data, read it directly into R from S3 bucket
+            if(!file.exists(file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions", paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv"))) & !download) {
+              this_afd <- s3read_using(FUN = data.table::fread, 
+                                       object = paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv"),
+                                       bucket = "earthlab-mkoontz/mcd14ml_gldas21_resolve-ecoregions")
+            }
+            
             # expand the FIRED dataset for the particular year such that each row represents a single
             # burning day for each FIRED event
             fired_by_day <-
@@ -106,10 +126,6 @@ afd_list <-
               dplyr::filter(lubridate::year(start_date) == i) %>% 
               dplyr::mutate(burning_days = v_determine_burning_days(start_date, last_date)) %>% 
               tidyr::unnest(cols = burning_days)
-
-            # Read in the active fire data for this year
-            this_afd <- 
-              data.table::fread(file.path("data", "data_output", "mcd14ml_gldas21_resolve-ecoregions", paste0("mcd14ml_gldas21_resolve-ecoregions_", i, ".csv"))) 
             
             # make the VERSION column a character type
             this_afd[, VERSION := as.character(VERSION)]
