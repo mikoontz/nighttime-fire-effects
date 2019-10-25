@@ -2,7 +2,6 @@
 
 library(sf)
 library(tidyverse)
-library(gmp)
 
 fired <- sf::st_read("data/data_raw/western_hemisphere_to_may2019.gpkg")
 
@@ -15,13 +14,18 @@ fired_4326 <-
   dplyr::mutate(id = as.character(id)) %>%
   dplyr::rename(ha_burned = area_burned_ha)
 
-fired_north <-
-  fired_4326 %>% 
-  dplyr::filter(north_south == "north")
+dir.create("data/data_output/FIRED_global/FIRED_western-hemisphere", recursive = TRUE)
 
-fired_south <-
-  fired_4326 %>% 
-  dplyr::filter(north_south == "south")
+sf::st_write(x = fired_4326, 
+             dsn = "data/data_output/FIRED_global/FIRED_western-hemisphere/FIRED_western-hemisphere.shp")
+
+# fired_north <-
+#   fired_4326 %>% 
+#   dplyr::filter(north_south == "north")
+# 
+# fired_south <-
+#   fired_4326 %>% 
+#   dplyr::filter(north_south == "south")
 
 dir.create("data/data_output/FIRED_global/FIRED_north-west-hemisphere", recursive = TRUE)
 
