@@ -21,11 +21,14 @@ modis_bowtie_buffer <- function(obj, nadir = FALSE, bowtie = FALSE) {
   # 2340 km swath width
   # 1 / 1.477 [sec per scan] * 60 [sec per minute] * 10 [km along-track per scan] * 1000 [m per km]
   # Equals 406.22884 km along-track per minute
-  # orbital inclination of 98.2 degrees (i.e., 8.2 degrees east of due north on ascending node)
   
   dist_along_track_per_minute_m <- 1 / 1.477 * 60 * 10 * 1000
   swath_width_m <- 2330 * 1000
   
+  # orbital inclination of 98.2 degrees (i.e., 8.2 degrees west of due north on ascending node)
+  # not ready to say that this is a definitely usable piece of this footprint creation, so
+  # keeping it to 0 for now (to make footprints always be oriented north/south). Perhaps
+  # better to use the swath width along the predicted orbit path, but that has its own challenges
   orbit_incl_offset <- 0
   
   # full-width offset or nadir offset?
@@ -42,6 +45,8 @@ modis_bowtie_buffer <- function(obj, nadir = FALSE, bowtie = FALSE) {
   # Very slight bowtie flaring because only one additional scan's bowtie
   # effect gets added to the cumulative track-length from one minute of the
   # satellite's movement
+  # Option to turn off this flaring in the 'bowtie=' argument; default is to square off the 
+  # footprint, rather than to bowtie.
   y_offset_large <- ifelse(nadir,
                            yes = y_offset_small,
                            no = ifelse(bowtie, 
@@ -60,10 +65,6 @@ modis_bowtie_buffer <- function(obj, nadir = FALSE, bowtie = FALSE) {
   
   hypotenuse_dist <- sqrt(y_offset_large ^ 2 + x_offset ^ 2)
   corner_angles <- atan(y_offset_large / x_offset) * 180 / pi
-  
-  coords <- st_coordinates(obj)
-  x <- coords[, 1]
-  y <- coords[, 2]
   
   bowties <-
     obj %>% 
@@ -98,40 +99,6 @@ modis_bowtie_buffer <- function(obj, nadir = FALSE, bowtie = FALSE) {
         list() %>% 
         st_polygon()
       
-      
-      # destPoint_to_pt1 <- ifelse(obj$asc == "ascending",
-      #                            yes = geosphere::destPoint(p = c(x, y), b = 0 + 8.2, d = y_offset_small),
-      #                            no = geosphere::destPoint(p = c(x, y), b = 180 - 8.2, d = y_offset_small))
-      # 
-      # destPoint_to_pt2 <- ifelse(obj$asc == "ascending",
-      #                            yes = geosphere::destPoint(p = c(x, y), b = 90 + 8.2 - corner_angles, d = hypotenuse_dist),
-      #                            no = geosphere::destPoint(p = c(x, y), b = 270 - 8.2 - corner_angles, d = hypotenuse_dist))
-      # 
-      # destPoint_to_pt3 <- ifelse(obj$asc == "ascending",
-      #                            yes = geosphere::destPoint(p = c(x, y), b = 90 + 8.2 + corner_angles, d = hypotenuse_dist),
-      #                            no = geosphere::destPoint(p = c(x, y), b = 270 + corner_angles, d = hypotenuse_dist))
-      # 
-      # destPoint_to_pt4 <- ifelse(obj$asc == "ascending",
-      #                            yes = geosphere::destPoint(p = c(x, y), b = 180 + 8.2, d = y_offset_small),
-      #                            no = geosphere::destPoint(p = c(x, y), b = 0 - 8.2, d = y_offset_small))
-      # 
-      # destPoint_to_pt5 <- ifelse(obj$asc == "ascending",
-      #                            yes = geosphere::destPoint(p = c(x, y), b = 270 + 8.2 - corner_angles, d = hypotenuse_dist),
-      #                            no = geosphere::destPoint(p = c(x, y), b = 90 - 8.2 - corner_angles, d = hypotenuse_dist))
-      # 
-      # destPoint_to_pt6 <- ifelse(obj$asc == "ascending",
-      #                            yes = geosphere::destPoint(p = c(x, y), b = 270 + 8.2 + corner_angles, d = hypotenuse_dist),
-      #                            no = geosphere::destPoint(p = c(x, y), b = 90 - 8.2 + corner_angles, d = hypotenuse_dist))
-      
-      # bowtie <- st_polygon(list(matrix(c(x, y + y_offset_small,
-      #                                    x + x_offset, y + y_offset_large,
-      #                                    x + x_offset,  y - y_offset_large,
-      #                                    x, y - y_offset_small,
-      #                                    x - x_offset, y - y_offset_large,
-      #                                    x - x_offset, y + y_offset_large,
-      #                                    x, y + y_offset_small),
-      #                                  byrow = TRUE,
-      #                                  ncol = 2)))
       return(bowtie)
     })
   
@@ -192,7 +159,8 @@ tle <-
 
 # Info describing meaning of each character
 # https://www.celestrak.com/NORAD/documentation/tle-fmt.php
-
+# assign some attributes to each TLE so they can be properly subset and matched
+# to the desired time of orbit prediction
 tle_compact <-
   tle %>% 
   tidyr::pivot_wider(names_from = line_number, values_from = line) %>% 
@@ -228,16 +196,29 @@ orbit_positions <-
   tibble(datetime = seq(start_date - minutes(1), start_date + days(n_periods * 16) - minutes(1), by = "1 min")) %>% 
   dplyr::mutate(aqua = mapply(FUN = function(x) {
     
+    # find the TLE for Aqua closest to the time at which we want to predict satellite position
     closest_aqua_tle <-
       tle_compact %>% 
       dplyr::filter(satellite == "aqua") %>% 
       dplyr::filter(rank(abs(as.numeric(date - x)), ties.method = "first") == 1)
     
+    # create an instance of the Orbital class that will let us make satellite position
+    # predictions
     this_orbital_info <-
       orb$Orbital("EOS-Aqua", line1 = closest_aqua_tle$L1, line2 = closest_aqua_tle$L2)
     
+    # get the longitude, latitude, and altitude of the satellite at datetime 'x'
     this_lonlatalt <- this_orbital_info$get_lonlatalt(x)
     
+    # is the satellite on its ascending or descending node (based on velocity in the 'z'
+    # direction; if positive, satellite is ascending south to north. If negative, satellite
+    # is descending north to south)
+    # useful for turning multipoints into linestrings representing the satellite path, which
+    # is not currently implemented. That code can be retrieved if we want to go that route
+    # instead. Basically, we turn each ascending or descending pass for each satellite into
+    # its own linestring, then buffer those linestrings with the swath width of the satellites,
+    # then use those noodle-looking orbit paths as polygons to rasterize. Challenging to get
+    # both the poles and the equator to work well using this method!
     this_asc <- ifelse(this_orbital_info$get_position(x, normalize = FALSE)[[2]][3, ] > 0,
                        yes = "ascending_node",
                        no = "descending_node")
