@@ -12,3 +12,4 @@ data/data_raw/*
 figures/missing-vpd-afd_2013.png
 figures/non-missing-vpd-afd_2013.png
 data/data_carpentry/overpass_pred.pl
+figures/*

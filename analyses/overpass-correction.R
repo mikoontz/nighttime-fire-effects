@@ -265,50 +265,84 @@ sat_footprints <-
 
 # rasterize the overlapping image footprints to a regular grid (using one of Joe's as
 # a template)
-r <- raster::raster("data/data_raw/mcd14ml-rasterized-template_0.25-degrees.tif")
+r_0.25 <- raster::raster("data/data_raw/grid_0_25_degree_vars_modis_D_AFC_num_April_2001.tif")
+r_2.5 <- raster::raster("data/data_raw/grid_2_5_degree_vars_modis_D_AFC_num_April_2001.tif")
 
-orbit_overlap <- 
-  fasterize::fasterize(sf = sat_footprints, raster = r, fun = "count")
-orbit_overlap <- orbit_overlap / (n_periods * 16)
+orbit_overlap_0.25 <- 
+  fasterize::fasterize(sf = sat_footprints, raster = r_0.25, fun = "count")
+orbit_overlap_0.25 <- orbit_overlap_0.25 / (n_periods * 16)
+
+orbit_overlap_2.5 <- 
+  fasterize::fasterize(sf = sat_footprints, raster = r_2.5, fun = "count")
+orbit_overlap_2.5 <- orbit_overlap_2.5 / (n_periods * 16)
 
 # visualize
-plot(orbit_overlap, col = viridis(30))
+plot(orbit_overlap_0.25, col = viridis(30))
+plot(st_as_sf(ne_coastline()) %>% st_geometry(), add = TRUE)
+
+plot(orbit_overlap_2.5, col = viridis(30))
 plot(st_as_sf(ne_coastline()) %>% st_geometry(), add = TRUE)
 
 # write to disk
 dir.create("analyses/analyses_output")
-writeRaster(x = orbit_overlap, filename = "analyses/analyses_output/aqua-terra-overpasses-per-day.tif")
+writeRaster(x = orbit_overlap_0.25, filename = "analyses/analyses_output/aqua-terra-overpasses-per-day_0.25-degree-grid.tif", overwrite = TRUE)
+writeRaster(x = orbit_overlap_2.5, filename = "analyses/analyses_output/aqua-terra-overpasses-per-day_2.5-degree-grid.tif", overwrite = TRUE)
 
 # Build a table demonstrating the empirical function that maps latitude to expected number of overpasses
 # per day
-samps <-
+samps_0.25 <-
   expand.grid(seq(-180, 180, by = 5), seq(-90, 90, by = 0.25)) %>% 
   setNames(c("lon", "lat")) %>% 
   as_tibble() %>% 
-  dplyr::mutate(overpasses = extract(x = orbit_overlap, y = .)) %>% 
+  dplyr::mutate(overpasses = extract(x = orbit_overlap_0.25, y = ., method = "bilinear")) %>% 
+  dplyr::filter(!is.na(overpasses))
+
+samps_2.5 <-
+  expand.grid(seq(-180, 180, by = 5), seq(-90, 90, by = 2.5)) %>% 
+  setNames(c("lon", "lat")) %>% 
+  as_tibble() %>% 
+  dplyr::mutate(overpasses = extract(x = orbit_overlap_2.5, y = ., method = "bilinear")) %>% 
   dplyr::filter(!is.na(overpasses))
 
 # include the range of observed overpasses as a minimum and maximum attribute
-overpass_corrections <- 
-  samps %>%
+overpass_corrections_0.25 <- 
+  samps_0.25 %>%
+  group_by(lat) %>% 
+  summarize(mean_overpasses = mean(overpasses),
+            min_overpasses = min(overpasses),
+            max_overpasses = max(overpasses))
+
+overpass_corrections_2.5 <- 
+  samps_2.5 %>%
   group_by(lat) %>% 
   summarize(mean_overpasses = mean(overpasses),
             min_overpasses = min(overpasses),
             max_overpasses = max(overpasses))
 
 # write to disk
-write.csv(overpass_corrections, file = "data/data_output/aqua-terra-overpass-corrections-table.csv", row.names = FALSE)
+write.csv(overpass_corrections_0.25, file = "analyses/analyses_output/aqua-terra-overpass-corrections-table_0.25-degree-grid.csv", row.names = FALSE)
+write.csv(overpass_corrections_2.5, file = "analyses/analyses_output/aqua-terra-overpass-corrections-table_2.5-degree-grid.csv", row.names = FALSE)
 
 # save the visualization to disk
-png("figures/aqua-terra-overpass-corrections-map.png")
-plot(orbit_overlap, col = viridis(30))
+png("figures/aqua-terra-overpass-corrections-map_0.25-degree-grid.png")
+plot(orbit_overlap_0.25, col = viridis(30))
+plot(st_as_sf(ne_coastline()) %>% st_geometry(), add = TRUE)
+dev.off()
+
+png("figures/aqua-terra-overpass-corrections-map_2.5-degree-grid.png")
+plot(orbit_overlap_2.5, col = viridis(30))
 plot(st_as_sf(ne_coastline()) %>% st_geometry(), add = TRUE)
 dev.off()
 
 # save the empirical model plot to disk
-png("figures/aqua-terra-overpass-corrections-function.png")
-ggplot(overpass_corrections %>% filter(lat %in% c(seq(-83.5, -70, by = 0.25), -69:69, seq(70, 83.5, by = 0.25))), aes(x = lat, y = mean_overpasses)) +
+ggplot(overpass_corrections_0.25 %>% filter(lat %in% c(seq(-83.5, -70, by = 0.25), -69:69, seq(70, 83.5, by = 0.25))), aes(x = lat, y = mean_overpasses)) +
   geom_point(cex = 0.3) +
   theme_bw() +
   geom_ribbon(aes(ymin = min_overpasses, ymax = max_overpasses), fill = "red", alpha = 0.1)
-dev.off()
+ggsave("figures/aqua-terra-overpass-corrections-function_0.25-degree-grid.png")
+
+ggplot(overpass_corrections_2.5 %>% filter(lat %in% c(seq(-83.5, -70, by = 0.25), -69:69, seq(70, 83.5, by = 0.25))), aes(x = lat, y = mean_overpasses)) +
+  geom_point(cex = 0.3) +
+  theme_bw() +
+  geom_ribbon(aes(ymin = min_overpasses, ymax = max_overpasses), fill = "red", alpha = 0.1)
+ggsave("figures/aqua-terra-overpass-corrections-function_2.5-degree-grid.png")
