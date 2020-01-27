@@ -179,7 +179,7 @@ tle_compact <-
 # complex orbital positions -----------------------------------------------
 
 start_date <- ymd("2019-01-01", tz = "zulu")
-n_periods <- 3
+n_periods <- 3 # 22.5 minutes to run on Macbook Pro for 3 periods (3*16 days)
 
 (start <- Sys.time())
 
@@ -257,11 +257,15 @@ orbit_sf <-
   st_as_sf(orbit_positions, coords = c("lon", "lat"), crs = 4326, remove = FALSE)
 
 # build bowties around each orbit position ---------------------------------------------------------------
-
+# 8 minutes to build polygons from points on the Macbook Pro
+(start <- Sys.time())
 sat_footprints <- 
   modis_bowtie_buffer(orbit_sf) %>% 
   st_wrap_dateline(options = c("WRAPDATELINE=YES", "DATELINEOFFSET=180")) %>% 
   st_cast("MULTIPOLYGON")
+(Sys.time() - start)
+
+sf::st_write(sat_footprints, "data/data_output/aqua-terra-footprints.gpkg")
 
 # rasterize the overlapping image footprints to a regular grid (using one of Joe's as
 # a template)
