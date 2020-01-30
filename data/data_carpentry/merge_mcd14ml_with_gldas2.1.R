@@ -11,10 +11,10 @@ library(mgcv)
 library(gganimate)
 library(viridis)
 
-get_mcd14mlGLDAS <- function(year, download = TRUE) {
+get_mcd14mlGLDAS <- function(year, download = FALSE) {
   
-  if(file.exists(paste0("data/data_output/mcd14ml-with-gldas2.1-climate-variables/mcd14ml_with_gldas_climate_variables_", year, ".csv"))) {
-    (afd_thisYear <- data.table::fread(paste0("data/data_output/mcd14ml-with-gldas2.1-climate-variables/mcd14ml_with_gldas_climate_variables_", year, ".csv")))
+  if(file.exists(paste0("data/data_output/mcd14ml_gldas21/mcd14ml_with_gldas_climate_variables_", year, ".csv"))) {
+    (afd_thisYear <- data.table::fread(paste0("data/data_output/mcd14ml_gldas21/mcd14ml_with_gldas_climate_variables_", year, ".csv")))
     
   } else {
     (afd_thisYear <- try(data.table::fread(paste0("https://earthlab-mkoontz.s3-us-west-2.amazonaws.com/mcd14ml-with-gldas2.1-climate-variables/mcd14ml_with_gldas_climate_variables_", year, ".csv"))))
@@ -25,11 +25,11 @@ get_mcd14mlGLDAS <- function(year, download = TRUE) {
     } else {
       
       if (download) {
-        if (!dir.exists("data/data_output/mcd14ml-with-gldas2.1-climate-variables")) {
-          dir.create("data/data_output/mcd14ml-with-gldas2.1-climate-variables")
+        if (!dir.exists("data/data_output/mcd14ml_gldas21")) {
+          dir.create("data/data_output/mcd14ml_gldas21")
         }
         data.table::fwrite(x = afd_thisYear, 
-                           file = paste0("data/data_output/mcd14ml-with-gldas2.1-climate-variables/mcd14ml_with_gldas_climate_variables_", year, ".csv"))
+                           file = paste0("data/data_output/mcd14ml_gldas21/mcd14ml_with_gldas_climate_variables_", year, ".csv"))
       }
     }
   }
@@ -83,4 +83,4 @@ afd_filtered[, .(max_solar_ang = max(solar_elev_ang)), by = (DAYNIGHT)]
 afd_filtered[, .(pct_solar_ang_gt_0 = length(which(solar_elev_ang > 0)) / length(solar_elev_ang)), by = (DAYNIGHT)]
 afd_filtered[, .(pct_solar_ang_lt_0 = length(which(solar_elev_ang < 0)) / length(solar_elev_ang)), by = (DAYNIGHT)]
 
-fwrite("data/data_output/mcd14ml-with-gldas2.1-climate-variables/mcd14ml_with_gldas_climate_variables.csv")
+fwrite(afd_filtered, "data/data_output/mcd14ml_gldas21/mcd14ml_with_gldas_climate_variables.csv")

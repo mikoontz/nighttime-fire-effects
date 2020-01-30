@@ -11,11 +11,11 @@ library(mgcv)
 library(gganimate)
 library(viridis)
 
-if(!file.exists("data/data_output/mcd14ml-with-gldas2.1-climate-variables/mcd14ml_with_gldas_climate_variables.csv")) {
+if(!file.exists("data/data_output/mcd14ml_gldas21/mcd14ml_with_gldas_climate_variables.csv")) {
   source("data/data_carpentry/merge_mcd14ml_with_gldas2.1.R")
 }
 
-afd_filtered <- fread("data/data_output/mcd14ml-with-gldas2.1-climate-variables/mcd14ml_with_gldas_climate_variables.csv")
+afd_filtered <- data.table::fread("data/data_output/mcd14ml-with-gldas2.1-climate-variables/mcd14ml_with_gldas_climate_variables.csv")
 
 # Where are there positive solar angles being called nighttime burning?
 # About 2.5%
