@@ -113,6 +113,130 @@ modis_bowtie_buffer <- function(obj, nadir = FALSE, bowtie = FALSE) {
 }
 
 
+# function creates the footprint of each minute's MODIS imagery -----------
+
+modis_footprint_buffer <- function(obj, nadir = FALSE, bowtie = FALSE) {
+  
+  # 1.477 seconds per scan (Wolfe et al., 2002)
+  # 10 km along-track distance in a single scan
+  # 2340 km swath width
+  # 1 / 1.477 [sec per scan] * 60 [sec per minute] * 10 [km along-track per scan] * 1000 [m per km]
+  # Equals 406.22884 km along-track per minute
+  
+  # dist_along_track_per_minute_m <- 1 / 1.477 * 60 * 10 * 1000
+  swath_width_m <- 2330 * 1000
+  
+  # orbital inclination of 98.2 degrees (i.e., 8.2 degrees west of due north on ascending node)
+  # not ready to say that this is a definitely usable piece of this footprint creation, so
+  # keeping it to 0 for now (to make footprints always be oriented north/south). Perhaps
+  # better to use the swath width along the predicted orbit path, but that has its own challenges
+  # orbit_incl_offset <- 0
+  
+  # full-width offset or nadir offset?
+  # assume a much narrower swath width if just considering the pixels closest to nadir
+  # here, I chose a 24-degree scan angle as still being nadir because this is
+  # the widest angle at which there is no overlap with other scans
+  
+  x_offset <- swath_width_m / 2
+  # y_offset_small <- dist_along_track_per_minute_m / 2
+  
+  # Very slight bowtie flaring because only one additional scan's bowtie
+  # effect gets added to the cumulative track-length from one minute of the
+  # satellite's movement
+  # Option to turn off this flaring in the 'bowtie=' argument; default is to square off the 
+  # footprint, rather than to bowtie.
+  # y_offset_large <- ifelse(nadir,
+  #                          yes = y_offset_small,
+  #                          no = ifelse(bowtie, 
+  #                                      yes = (dist_along_track_per_minute_m / 2) + 10000,
+  #                                      no = y_offset_small))
+  # 
+  # The bowtie is defined by 6 points relative to the footprint center. 
+  # Even if the bowtie is squared off and is just a rectangle,
+  # we still define 6 points.
+  # pt1 is straight forward from the lon/lat in the along-track direction
+  # pt2 is forward in the along track direction and right in the along scan direction
+  # pt3 is behind in the along track direction and right in the along scan direction
+  # pt4 is straight behind in the along track direction
+  # pt5 is behind in the along track direction and left in the along scan direction
+  # pt6 is forward in the along track direction and left in the along scan direction
+  
+  # hypotenuse_dist <- sqrt(y_offset_large ^ 2 + x_offset ^ 2)
+  # corner_angles <- atan(y_offset_large / x_offset) * 180 / pi
+  
+  # this_lon <- obj$this_lon[1]
+  # this_lat <- obj$this_lat[1]
+  # next_lon <- obj$next_lon[1]
+  # next_lat <- obj$next_lat[1]
+  
+  footprints <-
+    obj %>% 
+    st_drop_geometry() %>% 
+    dplyr::select(this_lon, this_lat, next_lon, next_lat) %>% 
+    purrr::pmap(.f = function(this_lon, this_lat, next_lon, next_lat) {
+      
+      # 
+      #       pt3-------pt4-------pt5
+      #       |                     |
+      #       |                     |
+      #       |                     |
+      #       pt2-------pt1-------pt6
+      
+      pt1 <- c(this_lon, this_lat)
+      pt4 <- c(next_lon, next_lat)
+      
+      # initial and final bearing in degrees
+      init_bearing <- geosphere::bearing(p1 = pt1, p2 = pt4)
+      final_bearing <- geosphere::finalBearing(p1 = pt1, p2 = pt4)
+      
+      fudge_factor <- 0
+      # fudge_factor <- 4
+      pt2 <- geosphere::destPoint(p = c(this_lon, this_lat), b = init_bearing - 90 + fudge_factor, d = x_offset)
+      pt3 <- geosphere::destPoint(p = c(next_lon, next_lat), b = final_bearing - 90 + fudge_factor, d = x_offset)
+      
+      pt5 <- geosphere::destPoint(p = c(next_lon, next_lat), b = final_bearing + 90 + fudge_factor, d = x_offset)
+      pt6 <- geosphere::destPoint(p = c(this_lon, this_lat), b = init_bearing + 90 + fudge_factor, d = x_offset)
+      
+      plot(st_buffer(st_linestring(rbind(pt1, pt4)), dist = x_offset, endCapStyle = "FLAT"), axes = TRUE)
+      plot(st_linestring(rbind(pt1, pt4)), axes = TRUE, add = TRUE)
+
+      # poly <- st_buffer(st_linestring(rbind(pt1, pt4)), dist = x_offset, endCapStyle = "FLAT")
+      n_pts <- 3
+      
+      poly <-
+        rbind(
+          pt1,
+          geosphere::gcIntermediate(pt1, pt2, n = n_pts),
+          pt2,
+          geosphere::gcIntermediate(pt2, pt3, n = n_pts),
+          pt3,
+          geosphere::gcIntermediate(pt3, pt4, n = n_pts),
+          pt4,
+          geosphere::gcIntermediate(pt4, pt5, n = n_pts),
+          pt5,
+          geosphere::gcIntermediate(pt5, pt6, n = n_pts),
+          pt6,
+          geosphere::gcIntermediate(pt6, pt1, n = n_pts),
+          pt1) %>% 
+        list() %>% 
+        st_polygon()
+      return(poly)
+      
+    })
+  
+  new_obj <-
+    obj %>%
+    st_drop_geometry() %>% 
+    dplyr::mutate(geometry = st_sfc(footprints, crs = st_crs(obj))) %>% 
+    st_as_sf() %>% 
+    st_wrap_dateline()
+  
+  return(new_obj)
+}
+
+test_footprints <- modis_footprint_buffer(obj)
+
+
 # setup python pieces -----------------------------------------------------
 # create a conda environment called "r-reticulate" if there isn't one already
 # Include the pyorbital package in the install
@@ -192,8 +316,10 @@ n_periods <- 3 # 22.5 minutes to run on Macbook Pro for 3 periods (3*16 days)
 # Then, we do the same thing to get the Terra longitude, latitude, and altitude at that
 # datetime.
 # We turn the data into long form using pivot_longer such that each row/da
+dates_of_interest <- tibble(datetime = seq(start_date - minutes(1), start_date + days(n_periods * 16) - minutes(1), by = "1 min"))
+
 orbit_positions <-
-  tibble(datetime = seq(start_date - minutes(1), start_date + days(n_periods * 16) - minutes(1), by = "1 min")) %>% 
+  dates_of_interest %>% 
   dplyr::mutate(aqua = mapply(FUN = function(x) {
     
     # find the TLE for Aqua closest to the time at which we want to predict satellite position
@@ -253,19 +379,36 @@ orbit_positions <-
 
 # make object spatial ---------------------------------------------------------------
 
+modis_crs <- "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
 orbit_sf <- 
-  st_as_sf(orbit_positions, coords = c("lon", "lat"), crs = 4326, remove = FALSE)
+  st_as_sf(orbit_positions, coords = c("lon", "lat"), crs = 4326, remove = FALSE) %>% 
+  # st_transform(modis_crs) %>% 
+  dplyr::mutate(this_lon = st_coordinates(.)[, 1],
+                this_lat = st_coordinates(.)[, 2]) %>% 
+  dplyr::arrange(satellite, datetime) %>% 
+  dplyr::mutate(next_lon = lead(this_lon), 
+                next_lat = lead(this_lat))
+
+obj <- orbit_sf %>% 
+  dplyr::filter(datetime %in% c(dates_of_interest$datetime, dates_of_interest$datetime + minutes(1)), satellite == "aqua")
 
 # build bowties around each orbit position ---------------------------------------------------------------
 # 8 minutes to build polygons from points on the Macbook Pro
+test_footprints <- modis_footprint_buffer(obj)
+
 (start <- Sys.time())
 sat_footprints <- 
   modis_bowtie_buffer(orbit_sf) %>% 
   st_wrap_dateline(options = c("WRAPDATELINE=YES", "DATELINEOFFSET=180")) %>% 
-  st_cast("MULTIPOLYGON")
+  st_cast("MULTIPOLYGON") %>% 
+  dplyr::mutate(year = year(datetime),
+                month = month(datetime),
+                day = day(datetime),
+                hour = hour(datetime),
+                minute = minute(datetime))
 (Sys.time() - start)
 
-sf::st_write(sat_footprints, "data/data_output/aqua-terra-footprints.gpkg")
+sf::st_write(obj = sat_footprints, dsn = "data/data_output/aqua-terra-footprints.gpkg", delete_dsn = TRUE)
 
 # rasterize the overlapping image footprints to a regular grid (using one of Joe's as
 # a template)
