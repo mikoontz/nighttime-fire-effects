@@ -13,6 +13,8 @@ library(geosphere)
 library(mgcv)
 library(purrr)
 library(furrr)
+library(devtools)
+devtools::install_github('cloudyr/aws.s3', ref = '46aa3db34b89946205e6f27ce6f745cea4bf4571')
 library(aws.s3)
 
 # function that creates bowtie polygon ------------------------------------
