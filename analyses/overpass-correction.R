@@ -11,6 +11,11 @@ library(rnaturalearth)
 library(viridis)
 library(geosphere)
 library(mgcv)
+library(purrr)
+library(furrr)
+library(doParallel)
+library(foreach)
+library(aws.s3)
 
 # function that creates bowtie polygon ------------------------------------
 
@@ -199,7 +204,7 @@ modis_footprint_buffer <- function(obj, nadir = FALSE, bowtie = FALSE) {
       
       plot(st_buffer(st_linestring(rbind(pt1, pt4)), dist = x_offset, endCapStyle = "FLAT"), axes = TRUE)
       plot(st_linestring(rbind(pt1, pt4)), axes = TRUE, add = TRUE)
-
+      
       # poly <- st_buffer(st_linestring(rbind(pt1, pt4)), dist = x_offset, endCapStyle = "FLAT")
       n_pts <- 3
       
@@ -234,8 +239,6 @@ modis_footprint_buffer <- function(obj, nadir = FALSE, bowtie = FALSE) {
   return(new_obj)
 }
 
-test_footprints <- modis_footprint_buffer(obj)
-
 
 # setup python pieces -----------------------------------------------------
 # create a conda environment called "r-reticulate" if there isn't one already
@@ -246,14 +249,11 @@ reticulate::conda_install("r-reticulate", packages = "pyorbital", pip = TRUE, fo
 # Activate the "r-reticulate" environment
 reticulate::use_condaenv("r-reticulate")
 
-# datetime <- reticulate::import("datetime")
-
 if(Sys.info()['sysname'] == "Windows") {
   orb <- reticulate::import("pyorbital.orbital")
 } else {
   orb <- reticulate::import("pyorbital")
   orb <- orb$orbital}
-
 
 # get TLE files -----------------------------------------------------------
 # The TLE comes in a single big text file, but only the single TLE for a particular
@@ -263,20 +263,34 @@ if(Sys.info()['sysname'] == "Windows") {
 # prediction is to be made. That is, if we want a predicted location of the
 # Aqua satellite on 2017-04-12 at 0900, we want to use the TLE with a datetime
 # closest to that day and time.
+if(!file.exists("data/data_output/aqua_27424_TLE_2002-05-04_2019-12-31.txt")) {
+  
+  aws.s3::save_object(object = "aqua-terra-overpass-corrections/aqua_27424_TLE_2002-05-04_2019-12-31.txt", 
+                      bucket = "earthlab-mkoontz",
+                      file = "data/data_output/aqua_27424_TLE_2002-05-04_2019-12-31.txt")
+}
 
-aqua_tle <- 
-  read_fwf(file = "data/data_raw/aqua_27424_TLE_2002-06-01_2019-10-22.txt", fwf_widths(69)) %>% 
+aqua_tle <-
+  read_fwf(file = "data/data_raw/aqua_27424_TLE_2002-05-04_2019-12-31.txt", fwf_widths(69)) %>% 
   dplyr::rename(line = X1) %>% 
   dplyr::mutate(line_number = as.numeric(substr(line, start = 1, stop = 1))) %>% 
   dplyr::mutate(id = rep(1:(n() / 2), each = 2),
-                satellite = "aqua")
+                satellite = "Aqua")
+
+if(!file.exists("data/data_output/terra_25994_TLE_1999-12-18_2019-12-31.txt")) {
+  
+  aws.s3::save_object(object = "aqua-terra-overpass-corrections/terra_25994_TLE_1999-12-18_2019-12-31.txt", 
+                      bucket = "earthlab-mkoontz", 
+                      file = "data/data_output/terra_25994_TLE_1999-12-18_2019-12-31.txt")
+  
+} 
 
 terra_tle <- 
-  read_fwf(file = "data/data_raw/terra_25994_TLE_2002-06-01_2019-10-22.txt", fwf_widths(69)) %>% 
+  read_fwf(file = "data/data_output/terra_25994_TLE_1999-12-18_2019-12-31.txt", fwf_widths(69)) %>% 
   dplyr::rename(line = X1) %>% 
   dplyr::mutate(line_number = as.numeric(substr(line, start = 1, stop = 1))) %>% 
   dplyr::mutate(id = rep(1:(n() / 2), each = 2),
-                satellite = "terra")
+                satellite = "Terra")
 
 tle <-
   rbind(aqua_tle, terra_tle)
@@ -303,35 +317,86 @@ tle_compact <-
 # complex orbital positions -----------------------------------------------
 
 start_date <- ymd("2019-01-01", tz = "zulu")
-n_periods <- 3 # 22.5 minutes to run on Macbook Pro for 3 periods (3*16 days)
+n_periods <- 1/16
+end_date <- start_date + days(n_periods * 16)
+# end_date <- start_date + minutes(2)
 
-(start <- Sys.time())
+# 22.5 minutes to run on Macbook Pro for 3 periods (3*16 days) 
+# 11.75 minutes on the Alien
+# 3.0 minutes when parallelized on Alien with furrr::map!
+
+# start_date <- ymd("2002-06-01", tz = "zulu")
+# end_date <- ymd("2019-01-01", tz = "zulu")
 
 # First create a column in a data.frame representing the minute-ly sequence of datetimes
 # starting from the start date and continuing for an integer number of periods
 # The position of Aqua at that datetime is determined by first figuring out which of the
 # Aqua TLE is closest in time to the time we want to predict for.
 # Using this TLE, we calculate the longitude, latitude, and altitude using pyorbital
-# We iterate through all datetimes using the mapply() function
+# We iterate through all datetimes using a for loop (in the foreach package, so we can parallelize)
 # Then, we do the same thing to get the Terra longitude, latitude, and altitude at that
 # datetime.
-# We turn the data into long form using pivot_longer such that each row/da
-dates_of_interest <- tibble(datetime = seq(start_date - minutes(1), start_date + days(n_periods * 16) - minutes(1), by = "1 min"))
+# Note that we need to include the final Python to R translation piece within each mapped function
+# in order for this to work in parallel
+
+# Combine Aqua and Terra operations by using an expanded initial dataframe
+# terra_dates_of_interest <-
+#   tibble(datetime = seq(ymd("1999-12-18", tz = "zulu") - minutes(1), ymd("2019-12-31", tz = "zulu") - minutes(1), by = "1 min"),
+#          satellite = "Terra")
+# 
+# aqua_dates_of_interest <-
+#   tibble(datetime = seq(ymd("2002-05-04", tz = "zulu") - minutes(1), ymd("2019-12-31", tz = "zulu") - minutes(1), by = "1 min"),
+#          satellite = "Aqua")
+# 
+# dates_of_interest <-
+#   rbind(terra_dates_of_interest, aqua_dates_of_interest) %>% 
+#   dplyr::arrange(datetime)
+
+dates_of_interest <-
+  expand.grid(datetime = seq(start_date - minutes(1), end_date - minutes(1), by = "1 min"), satellite = c("Aqua", "Terra")) %>%
+  as_tibble() %>%
+  dplyr::arrange(datetime) %>%
+  dplyr::mutate(satellite = as.character(satellite))
+
+#22
+(start <- Sys.time())
+plan(multiprocess)
 
 orbit_positions <-
-  dates_of_interest %>% 
-  dplyr::mutate(aqua = mapply(FUN = function(x) {
+  dates_of_interest %>%
+  dplyr::mutate(location = furrr::future_map2(.x = datetime, .y = satellite, .f = function(x, y) {
     
-    # find the TLE for Aqua closest to the time at which we want to predict satellite position
-    closest_aqua_tle <-
-      tle_compact %>% 
-      dplyr::filter(satellite == "aqua") %>% 
-      dplyr::filter(rank(abs(as.numeric(date - x)), ties.method = "first") == 1)
+    # find the TLE for the correct satellite closest to the time at which we want to predict satellite position
+    this_tle <-
+      tle_compact %>%
+      dplyr::filter(satellite == y) %>%
+      dplyr::mutate(difftime_to_tle = as.numeric(date - x)) %>% 
+      dplyr::mutate(prior_or_next_tle = ifelse(difftime_to_tle < 0, yes = "prior", no = "next"))
+    
+    closest_tle <-
+      this_tle %>% 
+      dplyr::filter(rank(abs(difftime_to_tle), ties.method = "first") == 1)
+    
+    prior_tle <-
+      this_tle %>% 
+      dplyr::filter(prior_or_next_tle == "prior") %>% 
+      dplyr::filter(rank(abs(difftime_to_tle), ties.method = "first") == 1)
+    
+    next_tle <-
+      this_tle %>% 
+      dplyr::filter(prior_or_next_tle == "next") %>% 
+      dplyr::filter(rank(abs(difftime_to_tle), ties.method = "first") == 1)
+    
+    if(Sys.info()['sysname'] == "Windows") {
+      orb <- reticulate::import("pyorbital.orbital")
+    } else {
+      orb <- reticulate::import("pyorbital")
+      orb <- orb$orbital}
     
     # create an instance of the Orbital class that will let us make satellite position
     # predictions
     this_orbital_info <-
-      orb$Orbital("EOS-Aqua", line1 = closest_aqua_tle$L1, line2 = closest_aqua_tle$L2)
+      orb$Orbital(paste0("EOS-", y), line1 = closest_tle$L1, line2 = closest_tle$L2)
     
     # get the longitude, latitude, and altitude of the satellite at datetime 'x'
     this_lonlatalt <- this_orbital_info$get_lonlatalt(x)
@@ -349,32 +414,34 @@ orbit_positions <-
                        yes = "ascending_node",
                        no = "descending_node")
     
-    return(list(c(this_lonlatalt, this_asc)))
+    return(c(y, this_lonlatalt, this_asc, 
+             prior_tle$date, prior_tle$difftime_to_tle, prior_tle$L1, prior_tle$L2,
+             next_tle$date, next_tle$difftime_to_tle, next_tle$L1, next_tle$L2))
     
-  }, .$datetime),
-  terra = mapply(FUN = function(x) {
-    
-    closest_terra_tle <-
-      tle_compact %>%
-      dplyr::filter(satellite == "terra") %>%
-      dplyr::filter(rank(abs(as.numeric(date - x)), ties.method = "first") == 1)
-    
-    this_orbital_info <-
-      orb$Orbital("EOS-Terra", line1 = closest_terra_tle$L1, line2 = closest_terra_tle$L2)
-    
-    this_lonlatalt <- this_orbital_info$get_lonlatalt(x)
-    
-    this_asc <- ifelse(this_orbital_info$get_position(x, normalize = FALSE)[[2]][3, ] > 0,
-                       yes = "ascending_node",
-                       no = "descending_node")
-    
-    return(list(c(this_lonlatalt, this_asc)))
-    
-  }, .$datetime)) %>%
-  pivot_longer(cols = c(aqua, terra), names_to = "satellite", values_to = "location") %>%
-  tidyr::hoist(.col = location, lon = 1, lat = 2, alt = 3, asc = 4)
+  })) %>%
+  tidyr::hoist(.col = location, 
+               satellite = 1, lon = 2, lat = 3, alt = 4, asc = 5, 
+               prior_tle_datetime = 6, prior_tle_difftime = 7, prior_tle_L1 = 8, prior_tle_L2 = 9,
+               next_tle_datetime = 10, next_tle_difftime = 11, next_tle_L1 = 12, next_tle_L2 = 13,
+               .ptype = list(satellite = character(), lon = numeric(), lat = numeric(), alt = numeric(), asc = character(), 
+                             prior_tle_datetime = vctrs::new_datetime(), 
+                             prior_tle_difftime = numeric(), 
+                             prior_tle_L1 = character(), prior_tle_L2 = character(),
+                             next_tle_datetime = vctrs::new_datetime(), 
+                             next_tle_difftime = numeric(), 
+                             next_tle_L1 = character(), next_tle_L2 = character()))
+
+plan(sequential)
 
 (Sys.time() - start)
+
+aws.s3::s3write_using(x = orbit_positions, 
+                      FUN = data.table::fwrite, 
+                      object = "aqua-terra-overpass-corrections/orbit-positions_aqua-terra.csv",
+                      bucket = "earthlab-mkoontz")
+
+plan(multiprocess)
+
 
 
 # make object spatial ---------------------------------------------------------------
@@ -388,9 +455,6 @@ orbit_sf <-
   dplyr::arrange(satellite, datetime) %>% 
   dplyr::mutate(next_lon = lead(this_lon), 
                 next_lat = lead(this_lat))
-
-obj <- orbit_sf %>% 
-  dplyr::filter(datetime %in% c(dates_of_interest$datetime, dates_of_interest$datetime + minutes(1)), satellite == "aqua")
 
 # build bowties around each orbit position ---------------------------------------------------------------
 # 8 minutes to build polygons from points on the Macbook Pro
