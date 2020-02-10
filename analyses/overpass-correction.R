@@ -318,7 +318,7 @@ plan(multiprocess)
 
 orbit_positions <-
   dates_of_interest %>%
-  dplyr::mutate(location = furrr::future_map2(.x = datetime, .y = satellite, .f = function(x, y) {
+  dplyr::mutate(location = furrr::future_map2(.x = datetime, .y = satellite, .progress = TRUE, .f = function(x, y) {
     
     # find the TLE for the correct satellite closest to the time at which we want to predict satellite position
     this_tle <-
@@ -387,14 +387,15 @@ orbit_positions <-
 
 plan(sequential)
 
-(Sys.time() - start)
+data.table::fwrite(x = orbit_positions, file = "data/data_output/orbit-positions_aqua-terra.csv")
 
 aws.s3::s3write_using(x = orbit_positions, 
                       FUN = data.table::fwrite, 
                       object = "aqua-terra-overpass-corrections/orbit-positions_aqua-terra.csv",
                       bucket = "earthlab-mkoontz")
 
-plan(multiprocess)
+(Sys.time() - start)
+
 
 
 
