@@ -13,167 +13,117 @@ library(geosphere)
 library(mgcv)
 library(purrr)
 library(furrr)
-library(doParallel)
-library(foreach)
 library(aws.s3)
 
 # function that creates bowtie polygon ------------------------------------
 
-modis_bowtie_buffer <- function(obj, nadir = FALSE, bowtie = FALSE) {
-  
-  # 1.477 seconds per scan (Wolfe et al., 2002)
-  # 10 km along-track distance in a single scan
-  # 2340 km swath width
-  # 1 / 1.477 [sec per scan] * 60 [sec per minute] * 10 [km along-track per scan] * 1000 [m per km]
-  # Equals 406.22884 km along-track per minute
-  
-  dist_along_track_per_minute_m <- 1 / 1.477 * 60 * 10 * 1000
-  swath_width_m <- 2330 * 1000
-  
-  # orbital inclination of 98.2 degrees (i.e., 8.2 degrees west of due north on ascending node)
-  # not ready to say that this is a definitely usable piece of this footprint creation, so
-  # keeping it to 0 for now (to make footprints always be oriented north/south). Perhaps
-  # better to use the swath width along the predicted orbit path, but that has its own challenges
-  orbit_incl_offset <- 0
-  
-  # full-width offset or nadir offset?
-  # assume a much narrower swath width if just considering the pixels closest to nadir
-  # here, I chose a 24-degree scan angle as still being nadir because this is
-  # the widest angle at which there is no overlap with other scans
-  
-  x_offset <- ifelse(nadir, 
-                     yes = ((swath_width_m / 2) / (tan(55 * pi / 180)) * tan(24 * pi / 180)),
-                     no = swath_width_m / 2)
-  
-  y_offset_small <- dist_along_track_per_minute_m / 2
-  
-  # Very slight bowtie flaring because only one additional scan's bowtie
-  # effect gets added to the cumulative track-length from one minute of the
-  # satellite's movement
-  # Option to turn off this flaring in the 'bowtie=' argument; default is to square off the 
-  # footprint, rather than to bowtie.
-  y_offset_large <- ifelse(nadir,
-                           yes = y_offset_small,
-                           no = ifelse(bowtie, 
-                                       yes = (dist_along_track_per_minute_m / 2) + 10000,
-                                       no = y_offset_small))
-  
-  # The bowtie is defined by 6 points relative to the footprint center. 
-  # Even if the bowtie is squared off and is just a rectangle,
-  # we still define 6 points.
-  # pt1 is straight forward from the lon/lat in the along-track direction
-  # pt2 is forward in the along track direction and right in the along scan direction
-  # pt3 is behind in the along track direction and right in the along scan direction
-  # pt4 is straight behind in the along track direction
-  # pt5 is behind in the along track direction and left in the along scan direction
-  # pt6 is forward in the along track direction and left in the along scan direction
-  
-  hypotenuse_dist <- sqrt(y_offset_large ^ 2 + x_offset ^ 2)
-  corner_angles <- atan(y_offset_large / x_offset) * 180 / pi
-  
-  bowties <-
-    obj %>% 
-    st_drop_geometry() %>% 
-    dplyr::select(lon, lat) %>% 
-    purrr::pmap(.f = function(lon, lat) {
-      
-      pt1 <- geosphere::destPoint(p = c(lon, lat), b = 0 - orbit_incl_offset, d = y_offset_small)
-      pt2 <- geosphere::destPoint(p = c(lon, lat), b = 90 - orbit_incl_offset - corner_angles, d = hypotenuse_dist)
-      pt3 <- geosphere::destPoint(p = c(lon, lat), b = 90 - orbit_incl_offset + corner_angles, d = hypotenuse_dist)
-      pt4 <- geosphere::destPoint(p = c(lon, lat), b = 180 - orbit_incl_offset, d = y_offset_small)
-      pt5 <- geosphere::destPoint(p = c(lon, lat), b = 270 - orbit_incl_offset - corner_angles, d = hypotenuse_dist)
-      pt6 <- geosphere::destPoint(p = c(lon, lat), b = 270 - orbit_incl_offset + corner_angles, d = hypotenuse_dist)
-      
-      n_pts <- 3
-      
-      bowtie <-
-        rbind(
-          pt1,
-          geosphere::gcIntermediate(pt1, pt2, n = n_pts),
-          pt2,
-          geosphere::gcIntermediate(pt2, pt3, n = n_pts),
-          pt3,
-          geosphere::gcIntermediate(pt3, pt4, n = n_pts),
-          pt4,
-          geosphere::gcIntermediate(pt4, pt5, n = n_pts),
-          pt5,
-          geosphere::gcIntermediate(pt5, pt6, n = n_pts),
-          pt6,
-          geosphere::gcIntermediate(pt6, pt1, n = n_pts),
-          pt1) %>% 
-        list() %>% 
-        st_polygon()
-      
-      return(bowtie)
-    })
-  
-  new_obj <-
-    obj %>%
-    st_drop_geometry() %>% 
-    dplyr::mutate(geometry = st_sfc(bowties, crs = st_crs(obj))) %>% 
-    st_as_sf() %>% 
-    st_wrap_dateline()
-  
-  return(new_obj)
-}
+# modis_bowtie_buffer <- function(obj, nadir = FALSE, bowtie = FALSE) {
+#   
+#   # 1.477 seconds per scan (Wolfe et al., 2002)
+#   # 10 km along-track distance in a single scan
+#   # 2340 km swath width
+#   # 1 / 1.477 [sec per scan] * 60 [sec per minute] * 10 [km along-track per scan] * 1000 [m per km]
+#   # Equals 406.22884 km along-track per minute
+#   
+#   dist_along_track_per_minute_m <- 1 / 1.477 * 60 * 10 * 1000
+#   swath_width_m <- 2330 * 1000
+#   
+#   # orbital inclination of 98.2 degrees (i.e., 8.2 degrees west of due north on ascending node)
+#   # not ready to say that this is a definitely usable piece of this footprint creation, so
+#   # keeping it to 0 for now (to make footprints always be oriented north/south). Perhaps
+#   # better to use the swath width along the predicted orbit path, but that has its own challenges
+#   orbit_incl_offset <- 0
+#   
+#   # full-width offset or nadir offset?
+#   # assume a much narrower swath width if just considering the pixels closest to nadir
+#   # here, I chose a 24-degree scan angle as still being nadir because this is
+#   # the widest angle at which there is no overlap with other scans
+#   
+#   x_offset <- ifelse(nadir, 
+#                      yes = ((swath_width_m / 2) / (tan(55 * pi / 180)) * tan(24 * pi / 180)),
+#                      no = swath_width_m / 2)
+#   
+#   y_offset_small <- dist_along_track_per_minute_m / 2
+#   
+#   # Very slight bowtie flaring because only one additional scan's bowtie
+#   # effect gets added to the cumulative track-length from one minute of the
+#   # satellite's movement
+#   # Option to turn off this flaring in the 'bowtie=' argument; default is to square off the 
+#   # footprint, rather than to bowtie.
+#   y_offset_large <- ifelse(nadir,
+#                            yes = y_offset_small,
+#                            no = ifelse(bowtie, 
+#                                        yes = (dist_along_track_per_minute_m / 2) + 10000,
+#                                        no = y_offset_small))
+#   
+#   # The bowtie is defined by 6 points relative to the footprint center. 
+#   # Even if the bowtie is squared off and is just a rectangle,
+#   # we still define 6 points.
+#   # pt1 is straight forward from the lon/lat in the along-track direction
+#   # pt2 is forward in the along track direction and right in the along scan direction
+#   # pt3 is behind in the along track direction and right in the along scan direction
+#   # pt4 is straight behind in the along track direction
+#   # pt5 is behind in the along track direction and left in the along scan direction
+#   # pt6 is forward in the along track direction and left in the along scan direction
+#   
+#   hypotenuse_dist <- sqrt(y_offset_large ^ 2 + x_offset ^ 2)
+#   corner_angles <- atan(y_offset_large / x_offset) * 180 / pi
+#   
+#   bowties <-
+#     obj %>% 
+#     st_drop_geometry() %>% 
+#     dplyr::select(lon, lat) %>% 
+#     purrr::pmap(.f = function(lon, lat) {
+#       
+#       pt1 <- geosphere::destPoint(p = c(lon, lat), b = 0 - orbit_incl_offset, d = y_offset_small)
+#       pt2 <- geosphere::destPoint(p = c(lon, lat), b = 90 - orbit_incl_offset - corner_angles, d = hypotenuse_dist)
+#       pt3 <- geosphere::destPoint(p = c(lon, lat), b = 90 - orbit_incl_offset + corner_angles, d = hypotenuse_dist)
+#       pt4 <- geosphere::destPoint(p = c(lon, lat), b = 180 - orbit_incl_offset, d = y_offset_small)
+#       pt5 <- geosphere::destPoint(p = c(lon, lat), b = 270 - orbit_incl_offset - corner_angles, d = hypotenuse_dist)
+#       pt6 <- geosphere::destPoint(p = c(lon, lat), b = 270 - orbit_incl_offset + corner_angles, d = hypotenuse_dist)
+#       
+#       n_pts <- 3
+#       
+#       bowtie <-
+#         rbind(
+#           pt1,
+#           geosphere::gcIntermediate(pt1, pt2, n = n_pts),
+#           pt2,
+#           geosphere::gcIntermediate(pt2, pt3, n = n_pts),
+#           pt3,
+#           geosphere::gcIntermediate(pt3, pt4, n = n_pts),
+#           pt4,
+#           geosphere::gcIntermediate(pt4, pt5, n = n_pts),
+#           pt5,
+#           geosphere::gcIntermediate(pt5, pt6, n = n_pts),
+#           pt6,
+#           geosphere::gcIntermediate(pt6, pt1, n = n_pts),
+#           pt1) %>% 
+#         list() %>% 
+#         st_polygon()
+#       
+#       return(bowtie)
+#     })
+#   
+#   new_obj <-
+#     obj %>%
+#     st_drop_geometry() %>% 
+#     dplyr::mutate(geometry = st_sfc(bowties, crs = st_crs(obj))) %>% 
+#     st_as_sf() %>% 
+#     st_wrap_dateline()
+#   
+#   return(new_obj)
+# }
 
 
 # function creates the footprint of each minute's MODIS imagery -----------
 
 modis_footprint_buffer <- function(obj, nadir = FALSE, bowtie = FALSE) {
   
-  # 1.477 seconds per scan (Wolfe et al., 2002)
-  # 10 km along-track distance in a single scan
-  # 2340 km swath width
-  # 1 / 1.477 [sec per scan] * 60 [sec per minute] * 10 [km along-track per scan] * 1000 [m per km]
-  # Equals 406.22884 km along-track per minute
-  
-  # dist_along_track_per_minute_m <- 1 / 1.477 * 60 * 10 * 1000
   swath_width_m <- 2330 * 1000
   
-  # orbital inclination of 98.2 degrees (i.e., 8.2 degrees west of due north on ascending node)
-  # not ready to say that this is a definitely usable piece of this footprint creation, so
-  # keeping it to 0 for now (to make footprints always be oriented north/south). Perhaps
-  # better to use the swath width along the predicted orbit path, but that has its own challenges
-  # orbit_incl_offset <- 0
-  
-  # full-width offset or nadir offset?
-  # assume a much narrower swath width if just considering the pixels closest to nadir
-  # here, I chose a 24-degree scan angle as still being nadir because this is
-  # the widest angle at which there is no overlap with other scans
-  
   x_offset <- swath_width_m / 2
-  # y_offset_small <- dist_along_track_per_minute_m / 2
-  
-  # Very slight bowtie flaring because only one additional scan's bowtie
-  # effect gets added to the cumulative track-length from one minute of the
-  # satellite's movement
-  # Option to turn off this flaring in the 'bowtie=' argument; default is to square off the 
-  # footprint, rather than to bowtie.
-  # y_offset_large <- ifelse(nadir,
-  #                          yes = y_offset_small,
-  #                          no = ifelse(bowtie, 
-  #                                      yes = (dist_along_track_per_minute_m / 2) + 10000,
-  #                                      no = y_offset_small))
-  # 
-  # The bowtie is defined by 6 points relative to the footprint center. 
-  # Even if the bowtie is squared off and is just a rectangle,
-  # we still define 6 points.
-  # pt1 is straight forward from the lon/lat in the along-track direction
-  # pt2 is forward in the along track direction and right in the along scan direction
-  # pt3 is behind in the along track direction and right in the along scan direction
-  # pt4 is straight behind in the along track direction
-  # pt5 is behind in the along track direction and left in the along scan direction
-  # pt6 is forward in the along track direction and left in the along scan direction
-  
-  # hypotenuse_dist <- sqrt(y_offset_large ^ 2 + x_offset ^ 2)
-  # corner_angles <- atan(y_offset_large / x_offset) * 180 / pi
-  
-  # this_lon <- obj$this_lon[1]
-  # this_lat <- obj$this_lat[1]
-  # next_lon <- obj$next_lon[1]
-  # next_lat <- obj$next_lat[1]
-  
+
   footprints <-
     obj %>% 
     st_drop_geometry() %>% 
@@ -263,6 +213,11 @@ if(Sys.info()['sysname'] == "Windows") {
 # prediction is to be made. That is, if we want a predicted location of the
 # Aqua satellite on 2017-04-12 at 0900, we want to use the TLE with a datetime
 # closest to that day and time.
+
+if(!dir.exists("data/data_output")) {
+  dir.create("data/data_output", recursive = TRUE)
+}
+
 if(!file.exists("data/data_output/aqua_27424_TLE_2002-05-04_2019-12-31.txt")) {
   
   aws.s3::save_object(object = "aqua-terra-overpass-corrections/aqua_27424_TLE_2002-05-04_2019-12-31.txt", 
@@ -323,10 +278,13 @@ end_date <- start_date + days(n_periods * 16)
 
 # 22.5 minutes to run on Macbook Pro for 3 periods (3*16 days) 
 # 11.75 minutes on the Alien
-# 3.0 minutes when parallelized on Alien with furrr::map!
 
-# start_date <- ymd("2002-06-01", tz = "zulu")
-# end_date <- ymd("2019-01-01", tz = "zulu")
+# dates_of_interest <-
+#   expand.grid(datetime = seq(start_date - minutes(1), end_date - minutes(1), by = "1 min"), satellite = c("Aqua", "Terra")) %>%
+#   as_tibble() %>%
+#   dplyr::arrange(datetime) %>%
+#   dplyr::mutate(satellite = as.character(satellite))
+
 
 # First create a column in a data.frame representing the minute-ly sequence of datetimes
 # starting from the start date and continuing for an integer number of periods
@@ -340,25 +298,19 @@ end_date <- start_date + days(n_periods * 16)
 # in order for this to work in parallel
 
 # Combine Aqua and Terra operations by using an expanded initial dataframe
-# terra_dates_of_interest <-
-#   tibble(datetime = seq(ymd("1999-12-18", tz = "zulu") - minutes(1), ymd("2019-12-31", tz = "zulu") - minutes(1), by = "1 min"),
-#          satellite = "Terra")
-# 
-# aqua_dates_of_interest <-
-#   tibble(datetime = seq(ymd("2002-05-04", tz = "zulu") - minutes(1), ymd("2019-12-31", tz = "zulu") - minutes(1), by = "1 min"),
-#          satellite = "Aqua")
-# 
-# dates_of_interest <-
-#   rbind(terra_dates_of_interest, aqua_dates_of_interest) %>% 
-#   dplyr::arrange(datetime)
+terra_dates_of_interest <-
+  tibble(datetime = seq(ymd("1999-12-18", tz = "zulu") - minutes(1), ymd("2019-12-31", tz = "zulu") - minutes(1), by = "1 min"),
+         satellite = "Terra")
+
+aqua_dates_of_interest <-
+  tibble(datetime = seq(ymd("2002-05-04", tz = "zulu") - minutes(1), ymd("2019-12-31", tz = "zulu") - minutes(1), by = "1 min"),
+         satellite = "Aqua")
 
 dates_of_interest <-
-  expand.grid(datetime = seq(start_date - minutes(1), end_date - minutes(1), by = "1 min"), satellite = c("Aqua", "Terra")) %>%
-  as_tibble() %>%
-  dplyr::arrange(datetime) %>%
-  dplyr::mutate(satellite = as.character(satellite))
+  rbind(terra_dates_of_interest, aqua_dates_of_interest) %>%
+  dplyr::arrange(datetime)
 
-#22
+
 (start <- Sys.time())
 plan(multiprocess)
 
