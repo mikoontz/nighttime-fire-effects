@@ -126,11 +126,13 @@ modis_footprint_buffer <- function(obj, nadir = FALSE, bowtie = FALSE) {
   
   x_offset <- swath_width_m / 2
 
+  plan(multiprocess)
+  
   footprints <-
     obj %>% 
     st_drop_geometry() %>% 
-    dplyr::select(this_lon, this_lat, next_lon, next_lat) %>% 
-    purrr::pmap(.f = function(this_lon, this_lat, next_lon, next_lat) {
+    dplyr::select(lon, lat, next_lon, next_lat) %>% 
+    furrr::future_pmap(.f = function(this_lon, this_lat, next_lon, next_lat) {
       
       # 
       #       pt3-------pt4-------pt5
@@ -180,6 +182,8 @@ modis_footprint_buffer <- function(obj, nadir = FALSE, bowtie = FALSE) {
       return(poly)
       
     })
+
+  plan(sequential)
   
   new_obj <-
     obj %>%
@@ -281,11 +285,11 @@ end_date <- start_date + days(n_periods * 16)
 # 22.5 minutes to run on Macbook Pro for 3 periods (3*16 days) 
 # 11.75 minutes on the Alien
 
-# dates_of_interest <-
-#   expand.grid(datetime = seq(start_date - minutes(1), end_date - minutes(1), by = "1 min"), satellite = c("Aqua", "Terra")) %>%
-#   as_tibble() %>%
-#   dplyr::arrange(datetime) %>%
-#   dplyr::mutate(satellite = as.character(satellite))
+dates_of_interest <-
+  expand.grid(datetime = seq(start_date - minutes(1), end_date - minutes(1), by = "1 min"), satellite = c("Aqua", "Terra")) %>%
+  as_tibble() %>%
+  dplyr::arrange(datetime) %>%
+  dplyr::mutate(satellite = as.character(satellite))
 
 
 # First create a column in a data.frame representing the minute-ly sequence of datetimes
@@ -405,11 +409,9 @@ modis_crs <- "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units
 orbit_sf <- 
   st_as_sf(orbit_positions, coords = c("lon", "lat"), crs = 4326, remove = FALSE) %>% 
   # st_transform(modis_crs) %>% 
-  dplyr::mutate(this_lon = st_coordinates(.)[, 1],
-                this_lat = st_coordinates(.)[, 2]) %>% 
   dplyr::arrange(satellite, datetime) %>% 
-  dplyr::mutate(next_lon = lead(this_lon), 
-                next_lat = lead(this_lat))
+  dplyr::mutate(next_lon = lead(lon), 
+                next_lat = lead(lat))
 
 # build bowties around each orbit position ---------------------------------------------------------------
 # 8 minutes to build polygons from points on the Macbook Pro
