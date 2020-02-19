@@ -5,6 +5,7 @@ library(tidyverse)
 library(reticulate)
 library(lubridate)
 library(sf)
+library(lwgeom)
 library(raster)
 library(fasterize)
 library(rnaturalearth)
@@ -14,119 +15,36 @@ library(mgcv)
 library(purrr)
 library(furrr)
 
+# NOTE: Must use latest versions of GDAL, GEOS, and PROJ for this to work!
+# This SO answer was helpful for making sure {sf} linked to the latest
+# versions: https://stackoverflow.com/questions/44973639/trouble-installing-sf-due-to-gdal
+
 api_keys <- read_csv("data/data_raw/LAADS-DAAC_api-keys.csv")
 
 aqua_years <- 2002:2019
 terra_years <- 2000:2019
 
-if(!dir.exists(paths = file.path("data", "data_output", "MODIS-footprints", "TERRA"))) {
+if(!dir.exists(paths = file.path("data", "data_output", "MODIS-geoMeta61", "TERRA"))) {
   
-  dir.create(path = file.path("data", "data_output", "MODIS-footprints", "TERRA"))
+  dir.create(path = file.path("data", "data_output", "MODIS-geoMeta61", "TERRA"))
   
   lapply(terra_years[-1], FUN = function(this_year) {
-    system2(command = "wget", args = paste0('-e robots=off -m -np -R .html,.tmp -nH --cut-dirs=3 "https://ladsweb.modaps.eosdis.nasa.gov/archive/geoMeta/61/TERRA/', this_year, '/" --header "Authorization: Bearer ', dplyr::filter(api_keys, satellite == "Terra") %>% dplyr::pull(key), '" -P data/data_output/MODIS-footprints/'))
+    system2(command = "wget", args = paste0('-e robots=off -m -np -R .html,.tmp -nH --cut-dirs=3 "https://ladsweb.modaps.eosdis.nasa.gov/archive/geoMeta/61/TERRA/', this_year, '/" --header "Authorization: Bearer ', dplyr::filter(api_keys, satellite == "Terra") %>% dplyr::pull(key), '" -P data/data_output/MODIS-geoMeta61/'))
   })
   
 }
-if(!dir.exists(paths = file.path("data", "data_output", "MODIS-footprints", "AQUA"))) {
+if(!dir.exists(paths = file.path("data", "data_output", "MODIS-geoMeta61", "AQUA"))) {
   
-  dir.create(path = file.path("data", "data_output", "MODIS-footprints", "AQUA"))
+  dir.create(path = file.path("data", "data_output", "MODIS-geoMeta61", "AQUA"))
   
   lapply(aqua_years, FUN = function(this_year) {
-    system2(command = "wget", args = paste0('-e robots=off -m -np -R .html,.tmp -nH --cut-dirs=3 "https://ladsweb.modaps.eosdis.nasa.gov/archive/geoMeta/61/AQUA/', this_year, '/" --header "Authorization: Bearer ',  dplyr::filter(api_keys, satellite == "Aqua") %>% dplyr::pull(key), '" -P data/data_output/MODIS-footprints/'))
+    system2(command = "wget", args = paste0('-e robots=off -m -np -R .html,.tmp -nH --cut-dirs=3 "https://ladsweb.modaps.eosdis.nasa.gov/archive/geoMeta/61/AQUA/', this_year, '/" --header "Authorization: Bearer ',  dplyr::filter(api_keys, satellite == "Aqua") %>% dplyr::pull(key), '" -P data/data_output/MODIS-geoMeta61/'))
   })
   
 }
 
 
-aqua <- 
-  read_delim("data/data_output/MODIS-footprints/AQUA/2002/MYD03_2002-07-04.txt", delim = ",", skip = 2) %>% 
-  dplyr::rename(GranuleID = `# GranuleID`) %>% 
-  # slice(8) %>% 
-  # dplyr::select(-ends_with("BoundingCoord")) %>% 
-  dplyr::mutate(geometry = pmap(.l = list(lon1 = GRingLongitude1, lat1 = GRingLatitude1, 
-                                     lon2 = GRingLongitude2, lat2 = GRingLatitude2, 
-                                     lon3 = GRingLongitude3, lat3 = GRingLatitude3, 
-                                     lon4 = GRingLongitude4, lat4 = GRingLatitude4,
-                                     northbound = NorthBoundingCoord, southbound = SouthBoundingCoord,
-                                     eastbound = EastBoundingCoord, westbound = WestBoundingCoord),
-                                .f = function(lon1, lat1, lon2, lat2, lon3, lat3, lon4, lat4, northbound, southbound, eastbound, westbound) {
-                                  
-                                  pt1 <- c(lon1, lat1)
-                                  pt2 <- c(lon2, lat2)
-                                  pt3 <- c(lon3, lat3)
-                                  pt4 <- c(lon4, lat4)
-                                  
-                                  n_pts <- 10
-                                  
-                                  
-
-                                  # if(northbound >= 89.9) {
-                                  #   mat <- st_sfc(st_multipoint(matrix(rbind(pt1, pt2, pt3, pt4, pt1), ncol = 2)), crs = 4326)
-                                  # } else if(southbound <= -89.9) {
-                                  #   pt3.1 <- c(180, -90)
-                                  #   pt3.2 <- c(-180, -90)
-                                  #   mat <- st_sfc(st_multipoint(matrix(rbind(pt1, pt2, pt3, pt3.1, pt3.2, pt4, pt1), ncol = 2)), crs = 4326)
-                                  #   
-                                  # } else {
-                                  #   mat <- st_sfc(st_multipoint(matrix(rbind(pt1, pt2, pt3, pt4, pt1), ncol = 2)), crs = 4326)
-                                  # }
-
-                                  mat <- st_sfc(st_multipoint(matrix(rbind(pt1, pt2, pt3, pt4, pt1), ncol = 2)), crs = 4326)
-                                  
-                                  this_crs <- 4326
-                                  
-                                  footprint <-
-                                    mat %>% 
-                                    st_cast("LINESTRING") %>% 
-                                    st_transform(this_crs) %>% 
-                                    st_segmentize(dfMaxLength = units::set_units(10, km)) %>%
-                                    # st_transform(4326) %>% 
-                                    st_coordinates() %>% 
-                                    st_multipoint() # %>%
-                                    # st_cast(to = "MULTIPOLYGON")
-                                  # %>% 
-                                  #   list() %>% 
-                                  #   st_polygon() %>% 
-                                  #   st_wrap_dateline(options = c("WRAPDATELINE=YES", "DATELINEOFFSET=180"))
-                                  # 
-                                  # print(footprint)
-                                  # # footprint <-
-                                  #   footprint %>%
-                                  #   st_linestring()
-
-                                  # footprint <-
-                                  #         rbind(
-                                  #           pt1,
-                                  #           geosphere::gcIntermediate(pt1, pt2, n = n_pts),
-                                  #           pt2,
-                                  #           geosphere::gcIntermediate(pt2, pt3, n = n_pts),
-                                  #           pt3,
-                                  #           geosphere::gcIntermediate(pt3, pt4, n = n_pts),
-                                  #           pt4,
-                                  #           geosphere::gcIntermediate(pt4, pt1, n = n_pts),
-                                  #           pt1) %>%
-                                  #         list() %>%
-                                  #         st_polygon()
-                                  
-                                  return(footprint)
-
-                                })) %>% st_as_sf(crs = 4326) %>% rowid_to_column(var = "id") %>% 
-  st_wrap_dateline(options = c("WRAPDATELINE=YES", "DATELINEOFFSET=180"))
-modis_crs <- "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
-north_pole_crs <- "+proj=laea +lat_0=90 +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
-north_pole_crs <- 3995
-south_pole_crs <- "+proj=laea +lat_0=-90 +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
-south_pole_crs <- 3031
-
-increments_per_degree <- 2
-increments <- (180 * increments_per_degree) + 1
-global_extent <- 
-  tibble(lon = c(-180, rep(180, times = increments), rep(-180, increments)), lat = c(90, seq(from = 90, to = -90, length.out = increments), seq(from = -90, to = 90, length.out = increments))) %>% 
-  as.matrix() %>% 
-  st_multipoint() %>%
-  st_sfc(crs = 4326) %>%
-  st_cast(to = "LINESTRING")
+# global variables --------------------------------------------------------
 
 global_extent <- 
   tibble(lon = c(-180, 180, 180, -180, -180), lat = c(90, 90, -90, -90, 90)) %>% 
@@ -136,260 +54,333 @@ global_extent <-
   st_sfc(crs = 4326) %>% 
   st_sf()
 
-
-test <- aqua[8, ] %>% st_transform(3031) %>% st_cast("POLYGON")
-plot(test %>% st_geometry())
-
-st_coordinates(global_extent) %>% as_tibble() %>% filter(X %in% c(-180, 180))
-st_coordinates(aqua[8, ] %>% st_geometry()) %>% as_tibble() %>% filter(X %in% c(-180, 180))
-plot(global_extent)
-
-test <- lwgeom::st_split(global_extent, aqua[8, ])
-
-plot(test)
-plot(global_extent %>% st_geometry())
-plot(aqua[8, ] %>% st_geometry(), add = TRUE)
-plot(aqua[8, ] %>% st_cast("POLYGON") %>% st_geometry(), add = TRUE)
-
-plot(test %>% st_geometry())
-plot(aqua[1:30, "id"])
-plot(aqua[26:28, "id"], axes = TRUE, pal = viridis::viridis(3), lwd = 3)
-
-
-plot(aqua[17:30, ] %>% st_geometry(), axes = TRUE, lwd = 4)
-plot(extent, add = TRUE)
-
-
-plot(extent)
-plot(aqua[1:8, "id"], axes = TRUE, lwd = 4, add = TRUE)
-test <- st_cast(aqua, to = "POINT") %>% mutate(point_id = rep(c(1:4, 1), times = nrow(.) %/% 5))
-plot(test %>% filter(id >= 8 & id <= 8) %>% dplyr::select(point_id), pal = viridis::viridis(4), pch = 19, cex = 2)
-
-plot(st_join(aqua[8, ], extent))
-plot(aqua[8, ] %>% st_geometry())
-plot(extent %>% st_geometry(), add = TRUE)
-st_coordinates(extent)
-coords <- st_coordinates(aqua[8, ])
-coords %>% as_tibble() %>% filter(X < -180)
-
-one <- test %>% filter(id == 8)
-
-plot(one[, "point_id"], cex = 2, pch = 19, pal = viridis(4))
-mat <- st_coordinates(one)
-
+# raster templates
 
 r_0.25 <- raster::raster("data/data_raw/grid_0_25_degree_vars_modis_D_AFC_num_April_2001.tif")
+
 r_2.5 <- raster::raster("data/data_raw/grid_2_5_degree_vars_modis_D_AFC_num_April_2001.tif")
 
-r_polar <- 
-  gdalUtils::gdalwarp(srcfile = "data/data_raw/grid_2_5_degree_vars_modis_D_AFC_num_April_2001.tif", dstfile = "data/data_output/south-pole-stereo_2.5_raster-template.tif", s_srs = proj4string(r_2.5), t_srs = st_crs(3031)$proj4string)
+# read all the daily geoMeta data ----------------------------------------
+
+aqua <- 
+  list.files("data/data_output/MODIS-geoMeta61/AQUA", recursive = TRUE, full.names = TRUE) %>% 
+  tibble(satellite = "Aqua",
+         path = .,
+         year = substr(path, start = 40, stop = 43),
+         month = substr(path, start = 56, stop = 57),
+         day = substr(path, start = 59, stop = 60),
+         yday = lubridate::yday(ymd(substr(path, start = 51, stop = 60)))) %>% 
+  dplyr::mutate(geoMeta = purrr::map(path, .f = function(this_path) {
+    read_delim(this_path, 
+               delim = ",", 
+               skip = 2,
+               col_types = cols(
+                 `# GranuleID` = col_character(),
+                 StartDateTime = col_datetime(format = ""),
+                 ArchiveSet = col_double(),
+                 OrbitNumber = col_double(),
+                 DayNightFlag = col_character(),
+                 EastBoundingCoord = col_double(),
+                 NorthBoundingCoord = col_double(),
+                 SouthBoundingCoord = col_double(),
+                 WestBoundingCoord = col_double(),
+                 GRingLongitude1 = col_double(),
+                 GRingLongitude2 = col_double(),
+                 GRingLongitude3 = col_double(),
+                 GRingLongitude4 = col_double(),
+                 GRingLatitude1 = col_double(),
+                 GRingLatitude2 = col_double(),
+                 GRingLatitude3 = col_double(),
+                 GRingLatitude4 = col_double()
+               )) %>%
+      dplyr::rename(GranuleID = `# GranuleID`)
+    
+  }))
+
+terra <- 
+  list.files("data/data_output/MODIS-geoMeta61/TERRA", recursive = TRUE, full.names = TRUE) %>% 
+  tibble(satellite = "Terra",
+         path = .,
+         year = substr(path, start = 41, stop = 44),
+         month = substr(path, start = 57, stop = 58),
+         day = substr(path, start = 60, stop = 61),
+         yday = lubridate::yday(ymd(substr(path, start = 52, stop = 61)))) %>% 
+  dplyr::mutate(geoMeta = purrr::map(path, .f = function(this_path) {
+    read_delim(this_path, 
+               delim = ",", 
+               skip = 2,
+               col_types = cols(
+                 `# GranuleID` = col_character(),
+                 StartDateTime = col_datetime(format = ""),
+                 ArchiveSet = col_double(),
+                 OrbitNumber = col_double(),
+                 DayNightFlag = col_character(),
+                 EastBoundingCoord = col_double(),
+                 NorthBoundingCoord = col_double(),
+                 SouthBoundingCoord = col_double(),
+                 WestBoundingCoord = col_double(),
+                 GRingLongitude1 = col_double(),
+                 GRingLongitude2 = col_double(),
+                 GRingLongitude3 = col_double(),
+                 GRingLongitude4 = col_double(),
+                 GRingLatitude1 = col_double(),
+                 GRingLatitude2 = col_double(),
+                 GRingLatitude3 = col_double(),
+                 GRingLatitude4 = col_double()
+               )) %>%
+      dplyr::rename(GranuleID = `# GranuleID`)
+    
+  }))
+
+geoMeta_df <- rbind(aqua, terra)
+
+geoMeta_list <- 
+  geoMeta_df %>% 
+  dplyr::group_by(year, month, satellite) %>% 
+  dplyr::group_split()
+
+# write polygons (a slow step) to disk ------------------------------------
+
+dir.create("data/data_output/MODIS-footprints", recursive = TRUE)
+
+get_MODIS_footprints <- function(geoMeta) {
   
-r_polar_0.25 <- 
-  gdalUtils::gdalwarp(srcfile = "data/data_raw/grid_0_25_degree_vars_modis_D_AFC_num_April_2001.tif", dstfile = "data/data_output/south-pole-stereo_0.25_raster-template.tif", s_srs = proj4string(r_0.25), t_srs = st_crs(3031)$proj4string)
+  geoMeta <- tidyr::unnest(geoMeta, cols = geoMeta)
+  
+  footprints <-
+    pmap(geoMeta, .f = function(satellite, path, year, month, day, yday, GranuleID, StartDateTime, ArchiveSet, OrbitNumber, DayNightFlag, EastBoundingCoord, NorthBoundingCoord, SouthBoundingCoord, WestBoundingCoord, GRingLongitude1, GRingLongitude2, GRingLongitude3, GRingLongitude4, GRingLatitude1, GRingLatitude2, GRingLatitude3, GRingLatitude4) {
+      
+      pt1 <- c(GRingLongitude1, GRingLatitude1)
+      pt2 <- c(GRingLongitude2, GRingLatitude2)
+      pt3 <- c(GRingLongitude3, GRingLatitude3)
+      pt4 <- c(GRingLongitude4, GRingLatitude4)
+      
+      mat <- st_sfc(st_multipoint(matrix(rbind(pt1, pt2, pt3, pt4, pt1), ncol = 2)), crs = 4326)
+      
+      footprint_line <-
+        mat %>% 
+        st_cast("LINESTRING") %>%
+        st_segmentize(dfMaxLength = units::set_units(10, km))
+      
+      if(SouthBoundingCoord <= -89.9 | NorthBoundingCoord >= 89.9) {
+        
+        blade <- 
+          footprint_line %>% 
+          st_wrap_dateline(options = c("WRAPDATELINE=YES", "DATELINEOFFSET=180")) %>% 
+          st_cast("POINT") %>% 
+          sf::st_coordinates()
+        
+        blade <- blade[order(blade[, "X"]), ]
+        
+        blade <-
+          blade %>% 
+          st_linestring() %>% 
+          st_sfc(crs = 4326)
+        
+        split_globe <- lwgeom::st_split(x = global_extent, y = blade)
+        
+        suppressWarnings({
+          polys <- 
+            st_collection_extract(x = split_globe, type = "POLYGON") %>% 
+            dplyr::mutate(centroid_lat = st_coordinates(st_centroid(.))[, 2])
+        })
+        
+        if(SouthBoundingCoord > 0) {
+          footprint <- 
+            polys %>% 
+            filter(centroid_lat == max(centroid_lat)) %>% 
+            dplyr::select(-centroid_lat)
+          
+        } else {
+          footprint <- 
+            polys %>% 
+            filter(centroid_lat == min(centroid_lat)) %>% 
+            dplyr::select(-centroid_lat)
+          
+        }
+      } else {
+        footprint <- 
+          footprint_line %>% 
+          st_cast("POLYGON") %>% 
+          st_wrap_dateline(options = c("WRAPDATELINE=YES", "DATELINEOFFSET=180")) %>% 
+          st_sfc(crs = 4326) %>% 
+          st_sf(geometry = .)
+        
+      }
+      
+      # rebuild the sf object row by row
+      # cast everything to multipolygon so we can combine the resulting 
+      # list elements with data.table::rbindlist()
+      obj <- 
+        tibble(satellite, path, year, month, day, yday, GranuleID, StartDateTime, ArchiveSet, OrbitNumber, DayNightFlag, EastBoundingCoord, NorthBoundingCoord, SouthBoundingCoord, WestBoundingCoord, GRingLongitude1, GRingLongitude2, GRingLongitude3, GRingLongitude4, GRingLatitude1, GRingLatitude2, GRingLatitude3, GRingLatitude4, geometry = footprint$geometry) %>% 
+        st_sf() %>% 
+        st_cast("MULTIPOLYGON") 
+      
+      return(obj)
+      
+    })
+  
+  footprints <- do.call(what = "rbind", args = footprints)
+  
+  this_sat <- unique(footprints$satellite)
+  this_year <- unique(footprints$year)
+  this_month <- unique(footprints$month)
+  
+  this_path <- file.path("data", "data_output", "MODIS-footprints", paste0(this_year, "-", this_month, "_", this_sat, "_5-minute-footprints.gpkg"))
+  
+  sf::st_write(obj = footprints, dsn = this_path, delete_dsn = TRUE)
+  
+  return(footprints)
+  
+}
 
-r_polar <- raster::raster("data/data_output/south-pole-stereo_2.5_raster-template.tif")
-r_polar <- raster::raster("data/data_output/south-pole-stereo_0.25_raster-template.tif")
+geoMeta <- geoMeta_list[[1]]
 
-r_polar[] <- runif(n = ncell(r_polar))
-plot(r_polar)
-  raster::projectRaster(from = r_2.5, crs = st_crs(south_pole_crs)$proj4string, res = 2.5)
-r <- fasterize::fasterize(sf = test, raster = r_polar, fun = "count")
-plot(r)
+(start <- Sys.time())
+footprints_list <- lapply(geoMeta_list[1:2], get_MODIS_footprints)
+(difftime(Sys.time(), start, units = "min"))
 
-vals <- raster::values(r)
-sum(vals, na.rm = TRUE)
-any(!is.na(vals))
+footprints <- footprints_list[[1]]
 
-plot(test %>% st_geometry(), add = TRUE)
-aqua <- st_as_sf(aqua, crs = south_pole_crs)
-plot(aqua)
-plot(st_geometry(st_as_sf(aqua)))
-aqua$SouthBoundingCoord[8]
-st_coordinates(aqua[8, ])
-aqua %>% dplyr::select(ends_with("BoundingCoord")) %>% slice(8)
-aqua$geometry[8]
-plot(st_geometry(aqua[8, ]), axes = TRUE)
-plot(st_geometry(aqua[7:8, ]), axes = TRUE)
-plot(st_geometry(aqua[1:25, ]))
-plot(st_geometry(aqua$geometry[8][[1]]))
+# build rasterized count of overpasses ------------------------------------
 
-sf = st_sf(a=1, geom=st_sfc(st_linestring(rbind(c(0,0),c(1,1)))), crs = 4326)
-seg = st_segmentize(sf, units::set_units(100, km))
-seg = st_segmentize(sf, units::set_units(0.01, rad))
+count_overpasses <- function(footprints) {
+  
+  overpasses <- 
+    pmap(footprints[1:50, ], 
+         .f = function(satellite, path, year, month, day, yday, GranuleID, StartDateTime, ArchiveSet, OrbitNumber, DayNightFlag, EastBoundingCoord, NorthBoundingCoord, SouthBoundingCoord, WestBoundingCoord, GRingLongitude1, GRingLongitude2, GRingLongitude3, GRingLongitude4, GRingLatitude1, GRingLatitude2, GRingLatitude3, GRingLatitude4, geometry) {
+      
+           daynight_r <- 
+             r_0.25 %>% 
+             coordinates() %>% 
+             as.data.frame() %>% 
+             setNames(c("longitude", "latitude")) %>% 
+             dplyr::mutate(solar_offset = longitude / 15,
+                           acq_datetime = StartDateTime,
+                           acq_hour = hour(acq_datetime),
+                           acq_min = minute(acq_datetime),
+                           local_datetime = acq_datetime + as.duration(solar_offset * 60 * 60),
+                           local_doy = lubridate::yday(local_datetime),
+                           local_hour_decmin = ((acq_hour) + (acq_min / 60) + solar_offset + 24) %% 24,
+                           local_solar_hour_decmin_round = round(local_hour_decmin),
+                           local_solar_hour_decmin_round0.5 = round(local_hour_decmin * 2) / 2,
+                           h = (local_hour_decmin - 12) * 15 * pi / 180,
+                           phi = latitude * pi / 180,
+                           delta = -asin(0.39779 * cos(pi / 180 * (0.98565 * (local_doy + 10) + 360 / pi * 0.0167 * sin(pi / 180 * (0.98565 * (local_doy - 2)))))),
+                           solar_elev_angle = (asin(sin(phi)*sin(delta) + cos(phi)*cos(delta)*cos(h))) * 180 / pi,
+                           day = ifelse(solar_elev_angle >= 0, yes = 1, no = 0),
+                           night = ifelse(solar_elev_angle < 0, yes = 1, no = 0))
+           
+           day_r <- night_r <- r_0.25
+           values(day_r) <- daynight_r$day
+           values(night_r) <- daynight_r$night
+
+           r <- 
+             fasterize(sf = st_sf(st_sfc(geometry, crs = 4326)), 
+                       raster = r_0.25, 
+                       fun = "count", 
+                       background = 0)
+           
+           day_r <- day_r * r
+           night_r <- night_r * r
+           
+           return(list(day = day_r, night = night_r))
+           })
+  
+  day_sum <- lapply(overpasses, FUN = function(x) x$day) %>% stack() %>% sum()
+  night_sum <- lapply(overpasses, FUN = function(x) x$night) %>% stack() %>% sum()
+
+  plot(day_sum)
+  plot(night_sum)
+
+}
+
+satellite <- footprints$satellite[3]
+path <- footprints$path[3]
+year <- footprints$year[3]
+month <- footprints$month[3]
+day <- footprints$day[3]
+yday <- footprints$yday[3]
+GranuleID <- footprints$GranuleID[3]
+StartDateTime <- footprints$StartDateTime[3]
+ArchiveSet <- footprints$ArchiveSet[3]
+OrbitNumber <- footprints$OrbitNumber[3]
+DayNightFlag <- footprints$DayNightFlag[3]
+EastBoundingCoord <- footprints$EastBoundingCoord[3]
+NorthBoundingCoord <- footprints$NorthBoundingCoord[3]
+SouthBoundingCoord <- footprints$SouthBoundingCoord[3]
+WestBoundingCoord <- footprints$WestBoundingCoord[3]
+GRingLongitude1 <- footprints$GRingLongitude1[3]
+GRingLongitude2 <- footprints$GRingLongitude2[3]
+GRingLongitude3 <- footprints$GRingLongitude3[3]
+GRingLongitude4 <- footprints$GRingLongitude4[3]
+GRingLatitude1 <- footprints$GRingLatitude1[3]
+GRingLatitude2 <- footprints$GRingLatitude2[3]
+GRingLatitude3 <- footprints$GRingLatitude3[3]
+GRingLatitude4 <- footprints$GRingLatitude4[3]
+geometry <- footprints$geometry[3]
 
 
-plot(st_geometry(aqua[1:8, ]), axes = TRUE)
+# data.table implementation of solar elevation angle ----------------------
 
-plot(st_geometry(aqua[8:9, ]), axes = TRUE)
+this_afd[, acq_hour := floor(ACQ_TIME / 100)]
+this_afd[, acq_min := ((ACQ_TIME / 100) - acq_hour) * 100]
+this_afd[, acq_datetime := as.POSIXct((ACQ_DATE / 1000) + (acq_hour * 3600) + (acq_min * 60), 
+                                      origin = "1970-01-01", 
+                                      tz = "America/Los_Angeles")]
 
-aqua <-
-  aqua %>% 
-  dplyr::mutate(geometry = list(tibble(lon = c(GRingLongitude1, GRingLongitude2, GRingLongitude3, GRingLongitude4),
-                                       lat = c(GRingLatitude1, GRingLatitude2, GRingLatitude3, GRingLatitude4))))
+this_afd[, `:=`(acq_year = year(acq_datetime),
+                acq_month = month(acq_datetime),
+                acq_day = day(acq_datetime),
+                solar_offset = LONGITUDE / 15,
+                hemisphere = ifelse(LATITUDE >= 0, yes = "Northern hemisphere", no = "Southern hemisphere"))]
 
-aqua %>% dplyr::select(1, geometry)
-aqua$geometry[1]
-# # make object spatial ---------------------------------------------------------------
-# 
-# # 
-# orbit_positions <-
-#   data.table::rbindlist(all_orbit_positions)
-# 
-# modis_crs <- "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
-# 
-# orbit_sf <-
-#   st_as_sf(orbit_positions, coords = c("lon", "lat"), crs = 4326, remove = FALSE) %>% 
-#   st_transform(modis_crs) %>%
-#   dplyr::mutate(this_lon = st_coordinates(.)[, 1],
-#                 this_lat = st_coordinates(.)[, 2]) %>% 
-#   dplyr::arrange(satellite, datetime) %>% 
-#   dplyr::mutate(next_lon = lead(this_lon), 
-#                 next_lat = lead(this_lat))
-# 
-# # this_orbit_position <- data.table::copy(orbit_sf)
-# # next_orbit_position <- data.table::copy(orbit_sf)
-# # this_orbit_position[, `:=`(which_pos = "this", 
-# #                            next_lon = NULL, 
-# #                            next_lat = NULL,
-# #                            lon_sinu = this_lon,
-# #                            lat_sinu = this_lat,
-# #                            this_lon = NULL,
-# #                            this_lat = NULL)]
-# # 
-# # next_orbit_position[, `:=`(which_pos = "next", 
-# #                            this_lon = NULL, 
-# #                            this_lat = NULL,
-# #                            lon_sinu = next_lon,
-# #                            lat_sinu = next_lat,
-# #                            next_lon = NULL,
-# #                            next_lat = NULL)]
-# # 
-# # orbit_paths <- 
-# #   rbind(this_orbit_position, next_orbit_position)
-# # 
-# # orbit_paths <- orbit_paths[!is.na(lon_sinu)]
-# # 
-# # orbit_paths <-
-# #   orbit_paths %>% 
-# #   st_as_sf(coords = c("lon_sinu", "lat_sinu"), remove = FALSE, crs = modis_crs) %>% 
-# #   dtplyr::lazy_dt()
-# # 
-# # orbit_paths <-
-# #   orbit_paths %>% 
-# #   dplyr::group_by(id) %>% 
-# #   summarize()
-# # 
-# # install.packages("dtplyr")
-# # library(data.table)
-# # library(dtplyr)
-# # library(dplyr)
-# 
-# modis_footprint_buffer(orbit_sf[1:10, ])
-# ?st_wrap_dateline
-# 
-# # build bowties around each orbit position ---------------------------------------------------------------
-# # 8 minutes to build polygons from points on the Macbook Pro
-# 
-# dir.create("analyses/analyses_output/modis-footprints", recursive = TRUE)
-# 
-# (start <- Sys.time())
-# 
-# aqua_orbits <-
-#   orbit_sf %>% 
-#   dplyr::filter(satellite == "Aqua") %>% 
-#   dplyr::slice(-nrow(.))
-# 
-# aqua_footprints <- 
-#   modis_footprint_buffer(aqua_orbits) %>% 
-#   st_wrap_dateline(options = c("WRAPDATELINE=YES", "DATELINEOFFSET=180")) %>% 
-#   st_cast("MULTIPOLYGON") %>% 
-#   dplyr::mutate(year = year(datetime),
-#                 month = month(datetime),
-#                 day = day(datetime),
-#                 hour = hour(datetime),
-#                 minute = minute(datetime))
-# 
-# sf::st_write(obj = aqua_footprints, dsn = "analyses/analyses_output/modis-footprints/aqua-footprints.gpkg")
-# 
-# system2(command = "aws", args = "s3 cp analyses/analyses_output/modis-footprints/aqua-footprints.gpkg s3://earthlab-mkoontz/aqua-terra-overpass-corrections/modis-footprints/aqua-footprints.gpkg")
-# 
-# terra_orbits <-
-#   orbit_sf %>% 
-#   dplyr::filter(satellite == "Terra") %>% 
-#   dplyr::slice(-nrow(.))
-# 
-# terra_footprints <- 
-#   modis_footprint_buffer(terra_orbits) %>% 
-#   st_wrap_dateline(options = c("WRAPDATELINE=YES", "DATELINEOFFSET=180")) %>% 
-#   st_cast("MULTIPOLYGON") %>% 
-#   dplyr::mutate(year = year(datetime),
-#                 month = month(datetime),
-#                 day = day(datetime),
-#                 hour = hour(datetime),
-#                 minute = minute(datetime))
-# 
-# sf::st_write(obj = terra_footprints, dsn = "analyses/analyses_output/modis-footprints/terra-footprints.gpkg")
-# 
-# system2(command = "aws", args = "s3 cp analyses/analyses_output/modis-footprints/terra-footprints.gpkg s3://earthlab-mkoontz/aqua-terra-overpass-corrections/modis-footprints/terra-footprints.gpkg")
-# 
-# (Sys.time() - start)
-# 
-# # rasterize the overlapping image footprints to a regular grid (using one of Joe's as
-# # a template)
-# r_0.25 <- raster::raster("data/data_raw/grid_0_25_degree_vars_modis_D_AFC_num_April_2001.tif")
-# r_2.5 <- raster::raster("data/data_raw/grid_2_5_degree_vars_modis_D_AFC_num_April_2001.tif")
-# 
-# orbit_overlap_0.25 <- 
-#   fasterize::fasterize(sf = sat_footprints, raster = r_0.25, fun = "count")
-# orbit_overlap_0.25 <- orbit_overlap_0.25 / (n_periods * 16)
-# 
-# orbit_overlap_2.5 <- 
-#   fasterize::fasterize(sf = sat_footprints, raster = r_2.5, fun = "count")
-# orbit_overlap_2.5 <- orbit_overlap_2.5 / (n_periods * 16)
-# 
-# # visualize
-# plot(orbit_overlap_0.25, col = viridis(30))
-# plot(st_as_sf(ne_coastline()) %>% st_geometry(), add = TRUE)
-# 
-# plot(orbit_overlap_2.5, col = viridis(30))
-# plot(st_as_sf(ne_coastline()) %>% st_geometry(), add = TRUE)
-# 
-# # write to disk
-# dir.create("analyses/analyses_output")
-# writeRaster(x = orbit_overlap_0.25, filename = "analyses/analyses_output/aqua-terra-overpasses-per-day_0.25-degree-grid.tif", overwrite = TRUE)
-# writeRaster(x = orbit_overlap_2.5, filename = "analyses/analyses_output/aqua-terra-overpasses-per-day_2.5-degree-grid.tif", overwrite = TRUE)
-# 
-# # Build a table demonstrating the empirical function that maps latitude to expected number of overpasses
-# # per day
-# samps_0.25 <-
-#   expand.grid(seq(-180, 180, by = 5), seq(-90, 90, by = 0.25)) %>% 
-#   setNames(c("lon", "lat")) %>% 
-#   as_tibble() %>% 
-#   dplyr::mutate(overpasses = extract(x = orbit_overlap_0.25, y = ., method = "bilinear")) %>% 
-#   dplyr::filter(!is.na(overpasses))
-# 
-# samps_2.5 <-
-#   expand.grid(seq(-180, 180, by = 5), seq(-90, 90, by = 2.5)) %>% 
-#   setNames(c("lon", "lat")) %>% 
-#   as_tibble() %>% 
-#   dplyr::mutate(overpasses = extract(x = orbit_overlap_2.5, y = ., method = "bilinear")) %>% 
-#   dplyr::filter(!is.na(overpasses))
-# 
-# # include the range of observed overpasses as a minimum and maximum attribute
-# overpass_corrections_0.25 <- 
-#   samps_0.25 %>%
-#   group_by(lat) %>% 
-#   summarize(mean_overpasses = mean(overpasses),
-#             min_overpasses = min(overpasses),
-#             max_overpasses = max(overpasses))
-# 
-# overpass_corrections_2.5 <- 
-#   samps_2.5 %>%
-#   group_by(lat) %>% 
-#   summarize(mean_overpasses = mean(overpasses),
-#             min_overpasses = min(overpasses),
-#             max_overpasses = max(overpasses))
-# 
+this_afd[, acq_datetime_local := acq_datetime + as.duration(solar_offset * 60 * 60)]
+
+this_afd[, `:=`(local_doy = lubridate::yday(acq_datetime_local),
+                local_hour_decmin = ((acq_hour) + (acq_min / 60) + solar_offset + 24) %% 24)]
+
+this_afd[, `:=`(local_solar_hour_decmin_round = round(local_hour_decmin),
+                local_solar_hour_decmin_round0.5 = round(local_hour_decmin * 2) / 2)]
+
+# https://en.wikipedia.org/wiki/Solar_zenith_angle
+# https://en.wikipedia.org/wiki/Position_of_the_Sun#Declination_of_the_Sun_as_seen_from_Earth
+# https://en.wikipedia.org/wiki/Hour_angle
+
+this_afd[, `:=`(h = (local_hour_decmin - 12) * 15 * pi / 180,
+                phi = LATITUDE * pi / 180,
+                delta = -asin(0.39779 * cos(pi / 180 * (0.98565 * (local_doy + 10) + 360 / pi * 0.0167 * sin(pi / 180 * (0.98565 * (local_doy - 2)))))))]
+
+this_afd[, solar_elev_ang := (asin(sin(phi)*sin(delta) + cos(phi)*cos(delta)*cos(h))) * 180 / pi]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # # write to disk
 # write.csv(overpass_corrections_0.25, file = "analyses/analyses_output/aqua-terra-overpass-corrections-table_0.25-degree-grid.csv", row.names = FALSE)
 # write.csv(overpass_corrections_2.5, file = "analyses/analyses_output/aqua-terra-overpass-corrections-table_2.5-degree-grid.csv", row.names = FALSE)
