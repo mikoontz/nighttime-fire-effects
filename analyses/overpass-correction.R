@@ -2,47 +2,51 @@
 # overpasses at higher latitudes.
 
 library(tidyverse)
-library(reticulate)
 library(lubridate)
 library(sf)
 library(lwgeom)
 library(raster)
 library(fasterize)
-library(rnaturalearth)
 library(viridis)
-library(geosphere)
-library(mgcv)
 library(purrr)
 library(furrr)
+
+plan(multiprocess)
 
 # NOTE: Must use latest versions of GDAL, GEOS, and PROJ for this to work!
 # This SO answer was helpful for making sure {sf} linked to the latest
 # versions: https://stackoverflow.com/questions/44973639/trouble-installing-sf-due-to-gdal
 
-api_keys <- read_csv("data/data_raw/LAADS-DAAC_api-keys.csv")
-
 aqua_years <- 2002:2019
 terra_years <- 2000:2019
+geoMeta_source <- "s3" # could also be "laads-daac" or "local"
 
-if(!dir.exists(paths = file.path("data", "data_output", "MODIS-geoMeta61", "TERRA"))) {
-  
-  dir.create(path = file.path("data", "data_output", "MODIS-geoMeta61", "TERRA"))
-  
-  lapply(terra_years[-1], FUN = function(this_year) {
-    system2(command = "wget", args = paste0('-e robots=off -m -np -R .html,.tmp -nH --cut-dirs=3 "https://ladsweb.modaps.eosdis.nasa.gov/archive/geoMeta/61/TERRA/', this_year, '/" --header "Authorization: Bearer ', dplyr::filter(api_keys, satellite == "Terra") %>% dplyr::pull(key), '" -P data/data_output/MODIS-geoMeta61/'))
-  })
-  
+if(geoMeta_source != "local") {
+  if(geoMeta_source == "laads-daac") {
+    api_keys <- read_csv("data/data_raw/LAADS-DAAC_api-keys.csv")
+    
+    if(!dir.exists(paths = file.path("data", "data_output", "MODIS-geoMeta61", "TERRA"))) {
+      
+      dir.create(path = file.path("data", "data_output", "MODIS-geoMeta61", "TERRA"))
+      
+      lapply(terra_years, FUN = function(this_year) {
+        system2(command = "wget", args = paste0('-e robots=off -m -np -R .html,.tmp -nH --cut-dirs=3 "https://ladsweb.modaps.eosdis.nasa.gov/archive/geoMeta/61/TERRA/', this_year, '/" --header "Authorization: Bearer ', dplyr::filter(api_keys, satellite == "Terra") %>% dplyr::pull(key), '" -P data/data_output/MODIS-geoMeta61/'))
+      })
+      
+    }
+    if(!dir.exists(paths = file.path("data", "data_output", "MODIS-geoMeta61", "AQUA"))) {
+      
+      dir.create(path = file.path("data", "data_output", "MODIS-geoMeta61", "AQUA"))
+      
+      lapply(aqua_years, FUN = function(this_year) {
+        system2(command = "wget", args = paste0('-e robots=off -m -np -R .html,.tmp -nH --cut-dirs=3 "https://ladsweb.modaps.eosdis.nasa.gov/archive/geoMeta/61/AQUA/', this_year, '/" --header "Authorization: Bearer ',  dplyr::filter(api_keys, satellite == "Aqua") %>% dplyr::pull(key), '" -P data/data_output/MODIS-geoMeta61/'))
+      })
+      
+    }
+  } else if(geoMeta_source == "s3") {
+    system2(command = "aws", args = paste0('s3 sync s3://earthlab-mkoontz/MODIS-geoMeta61/ data/data_output/MODIS-geoMeta61/'))
+  }
 }
-if(!dir.exists(paths = file.path("data", "data_output", "MODIS-geoMeta61", "AQUA"))) {
-  
-  dir.create(path = file.path("data", "data_output", "MODIS-geoMeta61", "AQUA"))
-  
-  lapply(aqua_years, FUN = function(this_year) {
-    system2(command = "wget", args = paste0('-e robots=off -m -np -R .html,.tmp -nH --cut-dirs=3 "https://ladsweb.modaps.eosdis.nasa.gov/archive/geoMeta/61/AQUA/', this_year, '/" --header "Authorization: Bearer ',  dplyr::filter(api_keys, satellite == "Aqua") %>% dplyr::pull(key), '" -P data/data_output/MODIS-geoMeta61/'))
-  })
-  
-}
-
 
 # global variables --------------------------------------------------------
 
@@ -60,88 +64,7 @@ r_0.25 <- raster::raster("data/data_raw/grid_0_25_degree_vars_modis_D_AFC_num_Ap
 
 r_2.5 <- raster::raster("data/data_raw/grid_2_5_degree_vars_modis_D_AFC_num_April_2001.tif")
 
-# read all the daily geoMeta data ----------------------------------------
-
-aqua <- 
-  list.files("data/data_output/MODIS-geoMeta61/AQUA", recursive = TRUE, full.names = TRUE) %>% 
-  tibble(satellite = "Aqua",
-         path = .,
-         year = substr(path, start = 40, stop = 43),
-         month = substr(path, start = 56, stop = 57),
-         day = substr(path, start = 59, stop = 60),
-         yday = lubridate::yday(ymd(substr(path, start = 51, stop = 60)))) %>% 
-  dplyr::mutate(geoMeta = purrr::map(path, .f = function(this_path) {
-    read_delim(this_path, 
-               delim = ",", 
-               skip = 2,
-               col_types = cols(
-                 `# GranuleID` = col_character(),
-                 StartDateTime = col_datetime(format = ""),
-                 ArchiveSet = col_double(),
-                 OrbitNumber = col_double(),
-                 DayNightFlag = col_character(),
-                 EastBoundingCoord = col_double(),
-                 NorthBoundingCoord = col_double(),
-                 SouthBoundingCoord = col_double(),
-                 WestBoundingCoord = col_double(),
-                 GRingLongitude1 = col_double(),
-                 GRingLongitude2 = col_double(),
-                 GRingLongitude3 = col_double(),
-                 GRingLongitude4 = col_double(),
-                 GRingLatitude1 = col_double(),
-                 GRingLatitude2 = col_double(),
-                 GRingLatitude3 = col_double(),
-                 GRingLatitude4 = col_double()
-               )) %>%
-      dplyr::rename(GranuleID = `# GranuleID`)
-    
-  }))
-
-terra <- 
-  list.files("data/data_output/MODIS-geoMeta61/TERRA", recursive = TRUE, full.names = TRUE) %>% 
-  tibble(satellite = "Terra",
-         path = .,
-         year = substr(path, start = 41, stop = 44),
-         month = substr(path, start = 57, stop = 58),
-         day = substr(path, start = 60, stop = 61),
-         yday = lubridate::yday(ymd(substr(path, start = 52, stop = 61)))) %>% 
-  dplyr::mutate(geoMeta = purrr::map(path, .f = function(this_path) {
-    read_delim(this_path, 
-               delim = ",", 
-               skip = 2,
-               col_types = cols(
-                 `# GranuleID` = col_character(),
-                 StartDateTime = col_datetime(format = ""),
-                 ArchiveSet = col_double(),
-                 OrbitNumber = col_double(),
-                 DayNightFlag = col_character(),
-                 EastBoundingCoord = col_double(),
-                 NorthBoundingCoord = col_double(),
-                 SouthBoundingCoord = col_double(),
-                 WestBoundingCoord = col_double(),
-                 GRingLongitude1 = col_double(),
-                 GRingLongitude2 = col_double(),
-                 GRingLongitude3 = col_double(),
-                 GRingLongitude4 = col_double(),
-                 GRingLatitude1 = col_double(),
-                 GRingLatitude2 = col_double(),
-                 GRingLatitude3 = col_double(),
-                 GRingLatitude4 = col_double()
-               )) %>%
-      dplyr::rename(GranuleID = `# GranuleID`)
-    
-  }))
-
-geoMeta_df <- rbind(aqua, terra)
-
-geoMeta_list <- 
-  geoMeta_df %>% 
-  dplyr::group_by(year, month, satellite) %>% 
-  dplyr::group_split()
-
-# write polygons (a slow step) to disk ------------------------------------
-
-dir.create("data/data_output/MODIS-footprints", recursive = TRUE)
+# function to write polygons (a slow step) to disk ------------------------------------
 
 get_MODIS_footprints <- function(geoMeta) {
   
@@ -222,22 +145,102 @@ get_MODIS_footprints <- function(geoMeta) {
   
   footprints <- do.call(what = "rbind", args = footprints)
   
-  this_sat <- unique(footprints$satellite)
   this_year <- unique(footprints$year)
   this_month <- unique(footprints$month)
   
-  this_path <- file.path("data", "data_output", "MODIS-footprints", paste0(this_year, "-", this_month, "_", this_sat, "_5-minute-footprints.gpkg"))
+  this_path <- file.path("data", "data_output", "MODIS-footprints", paste0(this_year, "-", this_month, "_5-minute-footprints.gpkg"))
   
   sf::st_write(obj = footprints, dsn = this_path, delete_dsn = TRUE)
+  
+  system2(command = "aws", args = paste0('s3 sync ', this_path, 's3://earthlab-mkoontz/MODIS-footprints/'))
   
   return(footprints)
   
 }
 
-geoMeta <- geoMeta_list[[1]]
+# read all the daily geoMeta data ----------------------------------------
+
+aqua <- 
+  list.files("data/data_output/MODIS-geoMeta61/AQUA", recursive = TRUE, full.names = TRUE) %>% 
+  tibble(satellite = "Aqua",
+         path = .,
+         year = substr(path, start = 39, stop = 42),
+         month = substr(path, start = 55, stop = 56),
+         day = substr(path, start = 58, stop = 59),
+         yday = lubridate::yday(ymd(substr(path, start = 50, stop = 59)))) %>% 
+  dplyr::mutate(geoMeta = purrr::map(path, .f = function(this_path) {
+    read_delim(this_path, 
+               delim = ",", 
+               skip = 2,
+               col_types = cols(
+                 `# GranuleID` = col_character(),
+                 StartDateTime = col_datetime(format = ""),
+                 ArchiveSet = col_double(),
+                 OrbitNumber = col_double(),
+                 DayNightFlag = col_character(),
+                 EastBoundingCoord = col_double(),
+                 NorthBoundingCoord = col_double(),
+                 SouthBoundingCoord = col_double(),
+                 WestBoundingCoord = col_double(),
+                 GRingLongitude1 = col_double(),
+                 GRingLongitude2 = col_double(),
+                 GRingLongitude3 = col_double(),
+                 GRingLongitude4 = col_double(),
+                 GRingLatitude1 = col_double(),
+                 GRingLatitude2 = col_double(),
+                 GRingLatitude3 = col_double(),
+                 GRingLatitude4 = col_double()
+               )) %>%
+      dplyr::rename(GranuleID = `# GranuleID`)
+    
+  }))
+
+terra <- 
+  list.files("data/data_output/MODIS-geoMeta61/TERRA", recursive = TRUE, full.names = TRUE) %>% 
+  tibble(satellite = "Terra",
+         path = .,
+         year = substr(path, start = 40, stop = 43),
+         month = substr(path, start = 56, stop = 57),
+         day = substr(path, start = 59, stop = 60),
+         yday = lubridate::yday(ymd(substr(path, start = 51, stop = 60)))) %>% 
+  dplyr::mutate(geoMeta = purrr::map(path, .f = function(this_path) {
+    read_delim(this_path, 
+               delim = ",", 
+               skip = 2,
+               col_types = cols(
+                 `# GranuleID` = col_character(),
+                 StartDateTime = col_datetime(format = ""),
+                 ArchiveSet = col_double(),
+                 OrbitNumber = col_double(),
+                 DayNightFlag = col_character(),
+                 EastBoundingCoord = col_double(),
+                 NorthBoundingCoord = col_double(),
+                 SouthBoundingCoord = col_double(),
+                 WestBoundingCoord = col_double(),
+                 GRingLongitude1 = col_double(),
+                 GRingLongitude2 = col_double(),
+                 GRingLongitude3 = col_double(),
+                 GRingLongitude4 = col_double(),
+                 GRingLatitude1 = col_double(),
+                 GRingLatitude2 = col_double(),
+                 GRingLatitude3 = col_double(),
+                 GRingLatitude4 = col_double()
+               )) %>%
+      dplyr::rename(GranuleID = `# GranuleID`)
+    
+  }))
+
+geoMeta_df <- rbind(aqua, terra)
+
+geoMeta_list <- 
+  geoMeta_df %>% 
+  dplyr::group_by(year, month) %>% 
+  dplyr::group_split()
+
+dir.create("data/data_output/MODIS-footprints", recursive = TRUE)
 
 (start <- Sys.time())
-footprints_list <- lapply(geoMeta_list[1:2], get_MODIS_footprints)
+footprints_list <- furrr::future_map(geoMeta_list, get_MODIS_footprints)
 (difftime(Sys.time(), start, units = "min"))
 
 footprints <- footprints_list[[1]]
@@ -247,7 +250,7 @@ footprints <- footprints_list[[1]]
 count_overpasses <- function(footprints) {
   
   overpasses <- 
-    pmap(footprints[1:50, ], 
+    pmap(footprints[1:288, ], 
          .f = function(satellite, path, year, month, day, yday, GranuleID, StartDateTime, ArchiveSet, OrbitNumber, DayNightFlag, EastBoundingCoord, NorthBoundingCoord, SouthBoundingCoord, WestBoundingCoord, GRingLongitude1, GRingLongitude2, GRingLongitude3, GRingLongitude4, GRingLatitude1, GRingLatitude2, GRingLatitude3, GRingLatitude4, geometry) {
       
            daynight_r <- 
@@ -290,8 +293,9 @@ count_overpasses <- function(footprints) {
   day_sum <- lapply(overpasses, FUN = function(x) x$day) %>% stack() %>% sum()
   night_sum <- lapply(overpasses, FUN = function(x) x$night) %>% stack() %>% sum()
 
-  plot(day_sum)
-  plot(night_sum)
+  par(mfrow = c(1, 2))
+  plot(day_sum, col = viridis::viridis(6), main = "Day overpass count")
+  plot(night_sum, col = viridis::viridis(6), main = "Night overpass count")
 
 }
 
