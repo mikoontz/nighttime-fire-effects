@@ -234,7 +234,7 @@ terra <-
 geoMeta_df <- rbind(aqua, terra)
 
 # Find out what footprints have already been processed and don't redo that work
-to_be_processed <- 
+already_processed <- 
   system2(command = "aws", args = "s3 ls s3://earthlab-mkoontz/MODIS-footprints/", stdout = TRUE) %>% 
   tibble::enframe(name = NULL) %>% 
   setNames("files_on_aws") %>% 
@@ -244,7 +244,7 @@ to_be_processed <-
 geoMeta_list <- 
   geoMeta_df %>% 
   dplyr::mutate(year_month = paste(year, month, sep = "-")) %>% 
-  dplyr::filter(!(year_month %in% to_be_processed$year_month)) %>% 
+  dplyr::filter(!(year_month %in% already_processed$year_month)) %>% 
   dplyr::select(-year_month) %>% 
   dplyr::group_by(year, month) %>% 
   dplyr::group_split()
