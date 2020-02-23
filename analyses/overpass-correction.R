@@ -147,12 +147,13 @@ get_MODIS_footprints <- function(geoMeta) {
   
   this_year <- unique(footprints$year)
   this_month <- unique(footprints$month)
+  this_file <- paste0(this_year, "-", this_month, "_5-minute-footprints.gpkg")
   
-  this_path <- file.path("data", "data_output", "MODIS-footprints", paste0(this_year, "-", this_month, "_5-minute-footprints.gpkg"))
+  this_path <- file.path("data", "data_output", "MODIS-footprints", this_file)
   
   sf::st_write(obj = footprints, dsn = this_path, delete_dsn = TRUE)
   
-  system2(command = "aws", args = paste0('s3 sync ', this_path, 's3://earthlab-mkoontz/MODIS-footprints/'))
+  system2(command = "aws", args = paste0('s3 cp ', this_path, 's3://earthlab-mkoontz/MODIS-footprints/', this_file))
   
   return(footprints)
   
@@ -232,8 +233,19 @@ terra <-
 
 geoMeta_df <- rbind(aqua, terra)
 
+# Find out what footprints have already been processed and don't redo that work
+to_be_processed <- 
+  system2(command = "aws", args = "s3 ls s3://earthlab-mkoontz/MODIS-footprints/", stdout = TRUE) %>% 
+  tibble::enframe(name = NULL) %>% 
+  setNames("files_on_aws") %>% 
+  dplyr::mutate(footprints_processed = substr(files_on_aws, start = 32, stop = 63)) %>% 
+  dplyr::mutate(year_month = substr(footprints_processed, start = 1, stop = 7))
+
 geoMeta_list <- 
   geoMeta_df %>% 
+  dplyr::mutate(year_month = paste(year, month, sep = "-")) %>% 
+  dplyr::filter(!(year_month %in% to_be_processed$year_month)) %>% 
+  dplyr::select(-year_month) %>% 
   dplyr::group_by(year, month) %>% 
   dplyr::group_split()
 
@@ -243,14 +255,12 @@ dir.create("data/data_output/MODIS-footprints", recursive = TRUE)
 footprints_list <- furrr::future_map(geoMeta_list, get_MODIS_footprints)
 (difftime(Sys.time(), start, units = "min"))
 
-footprints <- footprints_list[[1]]
-
 # build rasterized count of overpasses ------------------------------------
 
 count_overpasses <- function(footprints) {
   
   overpasses <- 
-    pmap(footprints[1:288, ], 
+    pmap(footprints, 
          .f = function(satellite, path, year, month, day, yday, GranuleID, StartDateTime, ArchiveSet, OrbitNumber, DayNightFlag, EastBoundingCoord, NorthBoundingCoord, SouthBoundingCoord, WestBoundingCoord, GRingLongitude1, GRingLongitude2, GRingLongitude3, GRingLongitude4, GRingLatitude1, GRingLatitude2, GRingLatitude3, GRingLatitude4, geometry) {
       
            daynight_r <- 
@@ -298,6 +308,7 @@ count_overpasses <- function(footprints) {
   plot(night_sum, col = viridis::viridis(6), main = "Night overpass count")
 
 }
+
 
 satellite <- footprints$satellite[3]
 path <- footprints$path[3]
