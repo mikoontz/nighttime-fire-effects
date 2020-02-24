@@ -153,7 +153,7 @@ get_MODIS_footprints <- function(geoMeta) {
   
   sf::st_write(obj = footprints, dsn = this_path, delete_dsn = TRUE)
   
-  system2(command = "aws", args = paste0('s3 cp ', this_path, 's3://earthlab-mkoontz/MODIS-footprints/', this_file))
+  system2(command = "aws", args = paste0('s3 cp ', this_path, ' s3://earthlab-mkoontz/MODIS-footprints/', this_file))
   
   return(footprints)
   
