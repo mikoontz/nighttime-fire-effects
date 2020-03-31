@@ -39,21 +39,21 @@ purrr::map2(.x = to_download$s3_path, .y = to_download$local_path, .f = function
 dir.create("data/data_output/MODIS-overpass-counts_0.25_analysis-ready/month_2003-2018_DT/")
 
 if (length(list.files("data/data_output/MODIS-overpass-counts_0.25_analysis-ready/month_2003-2018_DT/", full.names = TRUE)) == 0) {
-all_overpasses <-
-  all_rasters %>% 
-  purrr::pmap(.f = function(months, daynight, s3_path, local_path) {
-    r <- raster::raster(local_path)
-    r <- raster::shift(x = r, dx = -0.125, dy = 0.125)
-    r_df <- as.data.frame(r, xy = TRUE)
-    DT <- as.data.table(r_df) %>% setNames(c("lon", "lat", "overpass_count"))
-    DT[, `:=`(daynight = daynight,
-              month = months)]
-    
-    dt_path <- paste0("data/data_output/MODIS-overpass-counts_0.25_analysis-ready/month_2003-2018_DT/", months, "_2003-2018_", daynight, "_overpass-count_DT.csv")
-    data.table::fwrite(x = DT, file = dt_path)
-    print(dt_path)
-    return(DT)
-  })
+  all_overpasses <-
+    all_rasters %>% 
+    purrr::pmap(.f = function(months, daynight, s3_path, local_path) {
+      r <- raster::raster(local_path)
+      r <- raster::shift(x = r, dx = -0.125, dy = 0.125)
+      r_df <- as.data.frame(r, xy = TRUE)
+      DT <- as.data.table(r_df) %>% setNames(c("lon", "lat", "overpass_count"))
+      DT[, `:=`(daynight = daynight,
+                month = months)]
+      
+      dt_path <- paste0("data/data_output/MODIS-overpass-counts_0.25_analysis-ready/month_2003-2018_DT/", months, "_2003-2018_", daynight, "_overpass-count_DT.csv")
+      data.table::fwrite(x = DT, file = dt_path)
+      print(dt_path)
+      return(DT)
+    })
 }
 
 all_overpasses <-
@@ -142,7 +142,8 @@ data.table::setkeyv(detections_per_doy_lon_lat_year, cols = c("lon", "lat"))
 
 # get landcover data ------------------------------------------------------
 
-landcovers_of_interest <- c(1:10, 12)
+# Just use the 11 landcovers that we used to derive our VPDt
+landcovers_of_interest <- c(1:2, 4:10, 12, 14)
 
 landcover <- raster::raster(x = "data/data_raw/GLDASp4_domveg_025d.nc4")
 landcover_area <- raster::area(landcover)
@@ -234,7 +235,7 @@ detections_per_doy_landcover <-
 detections_per_doy_landcover <-
   detections_per_doy_landcover %>% 
   dplyr::left_join(total_landcover_areas, by = "index") %>% 
-  dplyr::mutate(mean_detections_per_overpass_on_DOY_per_km2 = 1000 * mean_detections_per_overpass_on_DOY / total_area_of_landcover_km2,
+  dplyr::mutate(mean_detections_per_overpass_on_DOY_per_km2 = mean_detections_per_overpass_on_DOY / total_area_of_landcover_km2,
                 pct_of_landcover_area_affected_by_detections = mean_annual_area_affected_by_detections_on_DOY_km2 / total_area_of_landcover_km2,
                 detections_per_pixel = total_detections / n_pixels_with_detections,
                 frp_per_detection = total_frp / total_detections,
@@ -257,7 +258,7 @@ detections_per_doy_landcover_hemisphere <-
 detections_per_doy_landcover_hemisphere <-
   detections_per_doy_landcover_hemisphere %>% 
   dplyr::left_join(total_landcover_areas_hemisphere, by = c("index", "hemisphere")) %>% 
-  dplyr::mutate(mean_detections_per_overpass_on_DOY_per_km2 = 1000 * mean_detections_per_overpass_on_DOY / total_area_of_landcover_km2,
+  dplyr::mutate(mean_detections_per_overpass_on_DOY_per_km2 = mean_detections_per_overpass_on_DOY / total_area_of_landcover_km2,
                 pct_of_landcover_area_affected_by_detections = mean_annual_area_affected_by_detections_on_DOY_km2 / total_area_of_landcover_km2,
                 detections_per_pixel = total_detections / n_pixels_with_detections,
                 frp_per_detection = total_frp / total_detections,
@@ -267,7 +268,7 @@ detections_per_doy_landcover_hemisphere <-
 
 # defining the seasons ----------------------------------------------------
 
-doy_slider <- function(doy, this_afd, delta) {
+doy_slider <- function(this_afd, doy, delta, var) {
   
   start_doy <- doy - 1 - delta
   end_doy <- doy + delta
@@ -277,22 +278,12 @@ doy_slider <- function(doy, this_afd, delta) {
   doy_seq <- ifelse(doy_seq < 1, yes = doy_seq + 365, no = doy_seq)
   doy_seq <- ifelse(doy_seq > 365, yes = doy_seq - 365, no = doy_seq)
   
-  smoothed_data <- mean(this_afd$mean_detections_per_overpass_on_DOY_per_km2[this_afd$local_doy %in% doy_seq])
-  return(smoothed_data)
-}
-
-
-doy_slider_frp <- function(doy, this_afd, delta) {
+  smoothed_data <- 
+    this_afd %>% 
+    dplyr::filter(local_doy %in% doy_seq) %>% 
+    dplyr::pull({{var}}) %>% 
+    mean()
   
-  start_doy <- doy - 1 - delta
-  end_doy <- doy + delta
-  
-  doy_seq <- start_doy:end_doy
-  
-  doy_seq <- ifelse(doy_seq < 1, yes = doy_seq + 365, no = doy_seq)
-  doy_seq <- ifelse(doy_seq > 365, yes = doy_seq - 365, no = doy_seq)
-  
-  smoothed_data <- mean(this_afd$frp_per_overpass_on_DOY_per_km2[this_afd$local_doy %in% doy_seq])
   return(smoothed_data)
 }
 
@@ -305,36 +296,54 @@ afd_of_interest <-
   detections_per_doy_landcover %>% 
   dplyr::filter(index %in% landcovers_of_interest) %>% 
   dplyr::filter(local_doy != 366) %>% 
-  dplyr::arrange(index, daynight, local_doy) %>% 
   dplyr::group_by(index, daynight) %>% 
   dplyr::group_modify(.f = function(.x, ...) {
-    
     .x <-
       .x %>% 
-      dplyr::mutate(smoothed_detections = purrr::map_dbl(local_doy, 
+      dplyr::mutate(smoothed_detections = purrr::map_dbl(this_afd = ., 
+                                                         local_doy, 
                                                          .f = doy_slider,
-                                                         this_afd = .,
-                                                         delta = 15),
-                    smoothed_frp = purrr::map_dbl(local_doy,
-                                                  .f = doy_slider_frp,
+                                                         delta = 15,
+                                                         var = mean_detections_per_overpass_on_DOY_per_km2)) %>% 
+      dplyr::mutate(smoothed_frp = purrr::map_dbl(local_doy,
+                                                  .f = doy_slider,
                                                   this_afd = .,
-                                                  delta = 15)) %>% 
-      dplyr::mutate(over_threshold_raw = ifelse(mean_detections_per_overpass_on_DOY_per_km2 < (12/3650) * sum(mean_detections_per_overpass_on_DOY_per_km2), 
-                                                yes = alpha_low,
-                                                no = alpha_high),
-                    over_threshold_smooth = ifelse(smoothed_detections < (12/3650) * sum(smoothed_detections),
-                                                   yes = alpha_low,
-                                                   no = alpha_high),
-                    over_threshold_smooth_frp = ifelse(smoothed_frp < (12/3650) * sum(smoothed_frp),
-                                                   yes = alpha_low,
-                                                   no = alpha_high)) %>% 
-      dplyr::mutate(thresholded_detections_raw = ifelse(over_threshold_raw == alpha_high,
+                                                  delta = 15,
+                                                  var = frp_per_overpass_on_DOY_per_km2)) %>% 
+      dplyr::mutate(smoothed_detections = smoothed_detections * (sum(mean_detections_per_overpass_on_DOY_per_km2) / sum(smoothed_detections)),
+                    smoothed_frp = smoothed_frp * (sum(frp_per_overpass_on_DOY_per_km2) / sum(smoothed_frp))) %>% 
+      dplyr::mutate(over_threshold_raw_detections = ifelse(mean_detections_per_overpass_on_DOY_per_km2 < 
+                                                             (12/3650) * sum(mean_detections_per_overpass_on_DOY_per_km2), 
+                                                           yes = alpha_low,
+                                                           no = alpha_high),
+                    over_threshold_smooth_detections = ifelse(smoothed_detections < 
+                                                                (12/3650) * sum(smoothed_detections),
+                                                              yes = alpha_low,
+                                                              no = alpha_high),
+                    over_threshold_raw_frp = ifelse(frp_per_overpass_on_DOY_per_km2 < 
+                                                         (12/3650) * sum(frp_per_overpass_on_DOY_per_km2),
+                                                       yes = alpha_low,
+                                                       no = alpha_high),
+                    over_threshold_smooth_frp = ifelse(smoothed_frp < 
+                                                         (12/3650) * sum(smoothed_frp),
+                                                       yes = alpha_low,
+                                                       no = alpha_high)) %>% 
+      dplyr::mutate(thresholded_detections_raw = ifelse(over_threshold_raw_detections == alpha_high,
                                                         yes = mean_detections_per_overpass_on_DOY_per_km2,
                                                         no = NA),
-                    thresholded_detections_smooth = ifelse(over_threshold_smooth == alpha_high,
+                    thresholded_detections_smooth = ifelse(over_threshold_smooth_detections == alpha_high,
                                                            yes = smoothed_detections,
-                                                           no = NA))
+                                                           no = NA)) %>% 
+      dplyr::mutate(thresholded_frp_raw = ifelse(over_threshold_raw_frp == alpha_high,
+                                                 yes = frp_per_overpass_on_DOY_per_km2,
+                                                 no = NA),
+                    thresholded_frp_smooth = ifelse(over_threshold_smooth_frp == alpha_high,
+                                                    yes = smoothed_frp,
+                                                    no = NA))
+    
+    
     return(.x)
+    
   })
 
 # Determine landcover order
@@ -344,15 +353,23 @@ landcover_order <-
   dplyr::summarize(detections = sum(smoothed_detections)) %>% 
   dplyr::ungroup() %>% 
   dplyr::left_join(landcover_table, by = "index") %>% 
-  dplyr::mutate(landcover_split = factor(landcover_split, levels = landcover_split[order(detections, decreasing = TRUE)]))
+  dplyr::mutate(landcover_split = factor(landcover_split, levels = landcover_split[order(detections, decreasing = TRUE)]),
+                landcover = factor(landcover, levels = landcover[order(detections, decreasing = TRUE)]),
+                index = factor(index, levels = index[order(detections, decreasing = TRUE)]))
 
 afd_of_interest <-
   afd_of_interest %>% 
-  dplyr::mutate(landcover_split = factor(landcover_split, levels = levels(landcover_order$landcover_split)))
+  dplyr::ungroup() %>% 
+  dplyr::mutate(landcover_split = factor(landcover_split, levels = levels(landcover_order$landcover_split)),
+                landcover = factor(landcover, levels = levels(landcover_order$landcover)),
+                index = factor(index, levels = levels(landcover_order$index)))
 
 # Plot
 gg_fire_season <-
-  ggplot(afd_of_interest, aes(x = local_doy, y = 1000 * smoothed_detections, color = daynight, alpha = over_threshold_smooth)) +
+  ggplot(afd_of_interest, aes(x = local_doy, 
+                              y = 1e6 * smoothed_detections, 
+                              color = daynight, 
+                              alpha = over_threshold_smooth_detections)) +
   geom_line(lwd = 1) +
   theme_bw(base_size = 10) +
   theme(strip.text = element_text(angle = 0, face = "bold"),
@@ -361,10 +378,10 @@ gg_fire_season <-
         axis.text = element_text(),
         axis.title.x = element_blank(),
         legend.position = c(5/6, 1/8)) +
-  scale_color_manual(values = c("red", "black")) +
+  scale_color_manual(values = c("#b2182b", "#2166ac")) +
   facet_wrap(facets = vars(landcover_split), ncol = 3) +
   labs(x = "Day of year",
-       y = bquote("Mean detections per day per overpass per 1,000" ~ km^2),
+       y = bquote("Expected detections per day per overpass per 1 million" ~ km^2),
        color = "Day or night?") +
   guides(alpha = FALSE) +
   scale_x_continuous(breaks = first_of_months$doy_first, labels = first_of_months$name_abbrv) +
@@ -375,13 +392,16 @@ gg_fire_season <-
 
 gg_fire_season
 
-ggsave(filename = "figures/fire-seasonality_daynight-landcover.png", plot = gg_fire_season, width = 183, height = 4/3 * 183, units = "mm")
+ggsave(filename = "figures/fire-seasonality-detections_daynight-landcover.png", plot = gg_fire_season, width = 183, height = 4/3 * 183, units = "mm")
 
 
 # FRP
 
 gg_fire_season_frp <-
-  ggplot(afd_of_interest, aes(x = local_doy, y = 1000 * smoothed_frp, color = daynight, alpha = over_threshold_smooth_frp)) +
+  ggplot(afd_of_interest, aes(x = local_doy, 
+                              y = 1e6 * smoothed_frp, 
+                              color = daynight, 
+                              alpha = over_threshold_smooth_frp)) +
   geom_line(lwd = 1) +
   theme_bw(base_size = 10) +
   theme(strip.text = element_text(angle = 0, face = "bold"),
@@ -390,10 +410,10 @@ gg_fire_season_frp <-
         axis.text = element_text(),
         axis.title.x = element_blank(),
         legend.position = c(5/6, 1/8)) +
-  scale_color_manual(values = c("red", "black")) +
+  scale_color_manual(values = c("#b2182b", "#2166ac")) +
   facet_wrap(facets = vars(landcover_split), ncol = 3) +
   labs(x = "Day of year",
-       y = bquote("Mean FRP per day per overpass per 1,000" ~ km^2),
+       y = bquote("Expected FRP per day per overpass per 1 million" ~ km^2),
        color = "Day or night?") +
   guides(alpha = FALSE) +
   scale_x_continuous(breaks = first_of_months$doy_first, labels = first_of_months$name_abbrv) +
@@ -407,13 +427,17 @@ gg_fire_season_frp
 
 ggsave(filename = "figures/fire-seasonality-frp_daynight-landcover.png", plot = gg_fire_season_frp, width = 183, height = 4/3 * 183, units = "mm")
 
+# table summary -----------------------------------------------------------
 
+seasonality_table <-
+  afd_of_interest %>% 
+  group_by(index, landcover, daynight) %>% 
+  dplyr::summarize(season_length_detections = sum(over_threshold_smooth_detections == alpha_high),
+                   season_length_frp = sum(over_threshold_smooth_frp == alpha_high)) %>% 
+  tidyr::pivot_wider(names_from = daynight, values_from = c("season_length_detections", "season_length_frp")) %>% 
+  dplyr::arrange(index)
 
-
-afd_of_interest %>% dplyr::select(landcover_split, local_doy,mean_detections_per_overpass_on_DOY_per_km2, smoothed_detections, daynight, over_threshold_smooth) %>% 
-  dplyr::filter(local_doy == 16) %>% 
-  slice(1:100) %>% 
-  as.data.frame()
+readr::write_csv(seasonality_table, path = "tables/fire-seasonality-summary-table.csv")
 
 # by hemisphere also ------------------------------------------------------
 

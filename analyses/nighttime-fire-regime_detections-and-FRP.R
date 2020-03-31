@@ -207,7 +207,9 @@ afd_frp_landcover_wide <-
 night_fire_regime_table <-
   afd_frp_landcover_wide %>% 
   dplyr::left_join(landcover_table) %>% 
-  dplyr::arrange(desc(pct_night_afd)) %>% 
+  dplyr::filter(index %in% landcovers_of_interest) %>% 
+  dplyr::mutate(landcover = factor(landcover, levels = c("Evergreen Needleleaf Forest, Evergreen Broadleaf Forest, Deciduous Broadleaf Forest, Mixed Forest, Closed Shrublands, Open Shrublands, Woody Savannas, Savannas, Grassland, Cropland, Cropland/Natural Vegetation Mosaic"))) %>% 
+  dplyr::arrange(landcover) %>% 
   dplyr::select(-index) %>% 
   dplyr::select(landcover, 
                 detections_per_overpass_per_1e6km2_day, 
@@ -220,4 +222,4 @@ night_fire_regime_table <-
 
 night_fire_regime_table
 
-readr::write_csv(x = night_fire_regime_table, path = "figures/night-fire-regime-table.csv")
+readr::write_csv(x = night_fire_regime_table, path = "tables/night-fire-regime-table.csv")
