@@ -4,6 +4,17 @@ library(raster)
 library(here)
 library(gt)
 
+# https://climate.northwestknowledge.net/ACSL/NIGHTFIRE/nightstrend.nc
+
+if(!file.exists(here::here("data", "data_output", "nightstrend.nc"))) {
+  if(!dir.exists(here::here("data", "data_output"))) {
+    dir.create(here::here("data", "data_output"), recursive = TRUE)
+  }
+  download.file(url = "https://climate.northwestknowledge.net/ACSL/NIGHTFIRE/nightstrend.nc",
+                destfile = here::here("data", "data_output", "nightstrend.nc"),
+                method = "curl")
+}
+
 r <- raster::raster(here::here("data", "data_output", "nightstrend.nc"))
 r <- raster::rotate(x = r)
 
