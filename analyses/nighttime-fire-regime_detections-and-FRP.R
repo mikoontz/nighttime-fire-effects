@@ -50,11 +50,12 @@ afd_night <-
   do.call("stack", .) %>% 
   raster::calc(fun = sum)
 
-raster::writeRaster(x = afd_day, filename = "data/data_output/total-detections_day_0.25.tif")
-raster::writeRaster(x = afd_night, filename = "data/data_output/total-detections_night_0.25.tif")
-
+# Line up the rasters with the GLDAS landcover raster
 afd_day <- raster::shift(x = afd_day, dx = -0.125, dy = 0.125)
 afd_night <- raster::shift(x = afd_night, dx = -0.125, dy = 0.125)
+
+raster::writeRaster(x = afd_day, filename = "data/data_output/total-detections_day_0.25.tif")
+raster::writeRaster(x = afd_night, filename = "data/data_output/total-detections_night_0.25.tif")
 
 # FRP data ----------------------------------------------------------------
 
@@ -89,11 +90,12 @@ frp_night <-
   do.call("stack", .) %>% 
   raster::calc(fun = sum)
 
-raster::writeRaster(x = afd_day, filename = "data/data_output/frp_day_0.25.tif", overwrite = TRUE)
-raster::writeRaster(x = frp_night, filename = "data/data_output/frp_night_0.25.tif", overwrite = TRUE)
-
+# Line up the rasters with the GLDAS landcover raster
 frp_day <- raster::shift(x = frp_day, dx = -0.125, dy = 0.125)
 frp_night <- raster::shift(x = frp_night, dx = -0.125, dy = 0.125)
+
+raster::writeRaster(x = frp_day, filename = "data/data_output/frp_day_0.25.tif", overwrite = TRUE)
+raster::writeRaster(x = frp_night, filename = "data/data_output/frp_night_0.25.tif", overwrite = TRUE)
 
 # overpass count ----------------------------------------------------------
 
@@ -148,9 +150,12 @@ data.table::setkeyv(landcover_DT, cols = c("lon", "lat"))
 total_landcover_areas <-
   landcover_DT %>% 
   dplyr::group_by(index) %>% 
-  dplyr::summarize(total_area_of_landcover_km2 = as.numeric(sum(pixel_area_km2, na.rm = TRUE))) %>% 
+  dplyr::summarize(area_km2 = as.numeric(sum(pixel_area_km2, na.rm = TRUE))) %>% 
   dplyr::left_join(landcover_table, by = "index")
 
+# Convert landcover areas to a data.table for joining
+total_landcover_areas_DT <- as.data.table(total_landcover_areas)
+data.table::setkeyv(total_landcover_areas_DT, cols = c("index"))
 
 # correct for overpasses --------------------------------------------------
 day_DT <-
@@ -186,13 +191,31 @@ lon_lat_landcover <- landcover_DT[daynight_DT]
 
 
 # summarize across all pixels belonging to each landcover type (and daynight)
-afd_frp_landcover <- lon_lat_landcover[index %in% landcovers_of_interest, .(area_km2 = sum(pixel_area_km2),
-                                                                            detections_per_overpass = sum(detections_per_overpass),
+afd_frp_landcover <- lon_lat_landcover[index %in% landcovers_of_interest, .(detections_per_overpass = sum(detections_per_overpass),
                                                                             frp_per_overpass = sum(frp_per_overpass)),
                                        by = .(index, daynight)]
 
+afd_frp_landcover <- total_landcover_areas_DT[afd_frp_landcover]
+
 afd_frp_landcover <- afd_frp_landcover[, `:=`(detections_per_overpass_per_1e6km2 = 1e6 * detections_per_overpass / area_km2,
                                               frp_per_overpass_per_1e6km2 = 1e6 * frp_per_overpass / area_km2)]
+
+#####
+# summarize across all pixels belonging to burnable landcover types (and daynight)
+afd_frp_just_daynight <- lon_lat_landcover[index %in% landcovers_of_interest, .(detections_per_overpass = sum(detections_per_overpass),
+                                                                                frp_per_overpass = sum(frp_per_overpass)),
+                                           by = .(daynight)]
+
+total_burnable_area_km2 <-
+  total_landcover_areas %>% 
+  dplyr::filter(index %in% landcovers_of_interest) %>% 
+  dplyr::summarize(area_km2 = sum(area_km2)) %>% 
+  pull()
+
+afd_frp_just_daynight$area_km2 <- total_burnable_area_km2
+
+afd_frp_just_daynight <- afd_frp_just_daynight[, `:=`(detections_per_overpass_per_1e6km2 = 1e6 * detections_per_overpass / area_km2,
+                                                      frp_per_overpass_per_1e6km2 = 1e6 * frp_per_overpass / area_km2)]
 
 # pivot wider to put similar day and night measures in separate columns (so we can get
 # percent)
@@ -203,22 +226,51 @@ afd_frp_landcover_wide <-
   dplyr::mutate(pct_night_afd = 100 * detections_per_overpass_per_1e6km2_night / (detections_per_overpass_per_1e6km2_night + detections_per_overpass_per_1e6km2_day),
                 pct_night_frp = 100 * frp_per_overpass_per_1e6km2_night / (frp_per_overpass_per_1e6km2_night + frp_per_overpass_per_1e6km2_day))
 
+
+afd_frp_just_daynight_wide <-
+  afd_frp_just_daynight %>% 
+  dplyr::select(daynight, area_km2, detections_per_overpass_per_1e6km2, frp_per_overpass_per_1e6km2) %>% 
+  dplyr::mutate(landcover = "All Burnable Landcovers",
+                area_1e6km2 = area_km2 / 1e6) %>% 
+  tidyr::pivot_wider(names_from = "daynight", values_from = c("detections_per_overpass_per_1e6km2", "frp_per_overpass_per_1e6km2")) %>% 
+  dplyr::mutate(pct_night_afd = 100 * detections_per_overpass_per_1e6km2_night / (detections_per_overpass_per_1e6km2_night + detections_per_overpass_per_1e6km2_day),
+                pct_night_frp = 100 * frp_per_overpass_per_1e6km2_night / (frp_per_overpass_per_1e6km2_night + frp_per_overpass_per_1e6km2_day))
+
 # Make table suitable for printing
-night_fire_regime_table <-
-  afd_frp_landcover_wide %>% 
-  dplyr::left_join(landcover_table) %>% 
-  dplyr::filter(index %in% landcovers_of_interest) %>% 
-  dplyr::mutate(landcover = factor(landcover, levels = c("Evergreen Needleleaf Forest, Evergreen Broadleaf Forest, Deciduous Broadleaf Forest, Mixed Forest, Closed Shrublands, Open Shrublands, Woody Savannas, Savannas, Grassland, Cropland, Cropland/Natural Vegetation Mosaic"))) %>% 
-  dplyr::arrange(landcover) %>% 
-  dplyr::select(-index) %>% 
+# final row to be appended as the "total"
+
+total_row <-
+  afd_frp_just_daynight_wide %>% 
   dplyr::select(landcover, 
+                area_1e6km2,
                 detections_per_overpass_per_1e6km2_day, 
                 detections_per_overpass_per_1e6km2_night,
                 pct_night_afd,
                 frp_per_overpass_per_1e6km2_day,
                 frp_per_overpass_per_1e6km2_night, 
                 pct_night_frp) %>% 
-  dplyr::mutate_if(is.numeric, round, 2)
+  dplyr::mutate_if(is.numeric, sprintf, fmt = "%.1f")
+
+
+night_fire_regime_table <-
+  afd_frp_landcover_wide %>% 
+  dplyr::left_join(total_landcover_areas) %>% 
+  dplyr::mutate(area_1e6km2 = area_km2 / 1e6) %>% 
+  dplyr::filter(index %in% landcovers_of_interest) %>% 
+  # dplyr::mutate(landcover = factor(landcover, levels = c("Evergreen Needleleaf Forest, Evergreen Broadleaf Forest, Deciduous Broadleaf Forest, Mixed Forest, Closed Shrublands, Open Shrublands, Woody Savannas, Savannas, Grassland, Cropland, Cropland/Natural Vegetation Mosaic"))) %>% 
+  dplyr::arrange(dplyr::desc(pct_night_afd)) %>% 
+  dplyr::select(-index) %>% 
+  dplyr::select(landcover, 
+                area_1e6km2,
+                detections_per_overpass_per_1e6km2_day, 
+                detections_per_overpass_per_1e6km2_night,
+                pct_night_afd,
+                frp_per_overpass_per_1e6km2_day,
+                frp_per_overpass_per_1e6km2_night, 
+                pct_night_frp) %>% 
+  dplyr::mutate_if(is.numeric, sprintf, fmt = "%.1f") %>% 
+  rbind(total_row)
+
 
 night_fire_regime_table
 
