@@ -1,0 +1,13 @@
+landcover,area_1e6km2,detections_per_overpass_per_1e6km2_day,detections_per_overpass_per_1e6km2_night,pct_night_afd,frp_per_overpass_per_1e6km2_day,frp_per_overpass_per_1e6km2_night,pct_night_frp
+Evergreen Needleleaf Forest,7.3,7.3,3.6,32.7,789.5,230.0,22.6
+Closed Shrublands,0.2,12.0,4.3,26.4,1273.3,438.8,25.6
+Open Shrublands,20.8,11.0,3.3,22.9,891.9,157.2,15.0
+Cropland/Natural Vegetation Mosaic,1.7,23.4,4.1,14.9,783.5,146.0,15.7
+Grassland,14.0,22.7,3.5,13.3,1074.1,130.7,10.8
+Mixed Forest,8.9,15.4,2.3,13.1,651.6,83.1,11.3
+Evergreen Broadleaf Forest,16.8,64.5,8.3,11.5,2934.1,209.9,6.7
+Deciduous Broadleaf Forest,1.6,76.9,7.9,9.3,3330.5,281.9,7.8
+Cropland,14.8,29.0,2.7,8.6,838.3,74.1,8.1
+Savannas,9.3,179.0,16.6,8.5,7598.0,456.2,5.7
+Woody Savannas,5.1,308.5,19.3,5.9,13041.7,489.5,3.6
+All Burnable Landcovers,100.5,56.2,6.1,9.9,2493.5,195.4,7.3

@@ -1,0 +1,41 @@
+DAYNIGHT,landcover,misclassified_count,total_count,pct_misclassified
+D,Evergreen Broadleaf Forest,0,11457925,0
+N,Ocean,511,57720,0.8853083853083853
+D,Ocean,0,388554,0
+D,Mixed Forest,0,1945192,0
+N,Mixed Forest,3974,329229,1.2070625613175023
+D,Grassland,0,3605098,0
+D,missing value,0,355822,0
+N,missing value,435,68132,0.638466506193859
+N,Grassland,724,586353,0.12347510799808306
+D,Open Shrublands,0,2824721,0
+N,Open Shrublands,47788,874300,5.465858401006519
+D,Deciduous Broadleaf Forest,0,1307597,0
+D,Savannas,0,17641307,0
+D,Closed Shrublands,0,25817,0
+N,Closed Shrublands,0,9049,0
+D,Snow and Ice,0,3579,0
+N,Snow and Ice,1,383,0.26109660574412535
+D,Evergreen Needleleaf Forest,0,1022884,0
+N,Evergreen Broadleaf Forest,39,1492101,0.0026137640816539898
+D,Barren or Sparsely Vegetated,0,103858,0
+D,Cropland,0,6121365,0
+N,Cropland,27,521782,0.005174574822435423
+N,Evergreen Needleleaf Forest,59548,531348,11.206967938149763
+D,Woody Savannas,0,16760130,0
+N,Woody Savannas,0,1071021,0
+D,Cropland/Natural Vegetation Mosaic,0,457787,0
+N,Savannas,0,1635745,0
+N,Cropland/Natural Vegetation Mosaic,0,77192,0
+N,Deciduous Broadleaf Forest,0,142119,0
+D,Urban and Built-Up,0,106540,0
+N,Urban and Built-Up,22,17986,0.12231735794506839
+D,Permanent Wetland,0,32699,0
+N,Permanent Wetland,300,5271,5.691519635742743
+N,Barren or Sparsely Vegetated,0,79628,0
+D,Wooded Tundra,0,183297,0
+D,Deciduous Needleleaf Forest,0,397843,0
+N,Deciduous Needleleaf Forest,39425,177444,22.218277315660153
+N,Wooded Tundra,31707,77987,40.656776129354895
+D,Mixed Tundra,0,3126,0
+N,Mixed Tundra,383,1333,28.732183045761442

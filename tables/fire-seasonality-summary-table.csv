@@ -1,0 +1,12 @@
+index,landcover,season_length_detections_day,season_length_detections_night,season_length_frp_day,season_length_frp_night
+8,Woody Savannas,148,149,118,137
+9,Savannas,143,128,140,131
+2,Evergreen Broadleaf Forest,123,85,121,87
+4,Deciduous Broadleaf Forest,113,116,127,116
+1,Evergreen Needleleaf Forest,99,96,101,97
+14,Cropland/Natural Vegetation Mosaic,106,97,88,95
+6,Closed Shrublands,112,69,66,69
+10,Grassland,81,90,119,134
+7,Open Shrublands,106,109,100,97
+12,Cropland,102,144,82,135
+5,Mixed Forest,88,131,82,128
